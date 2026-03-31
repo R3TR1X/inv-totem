@@ -75,7 +75,7 @@ Auto-created on first launch with default values.
 - **Timing**: Hooked into `ClientTickEvents.END_CLIENT_TICK` from Fabric API
 - **Mappings**: Official Mojang 1.21.10 mappings
 
-## Anti-Cheat Evasion Strategy
+## Evasion Strategy
 
 1. **Physical UI Interaction**: Opens real `InventoryScreen` instead of manipulating inventory directly
 2. **Configurable Delays**: Custom `swapDelayMs` allows tuning for specific servers' detection patterns
