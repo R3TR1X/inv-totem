@@ -1,6 +1,6 @@
 # Inv-Totem: Delayed Auto-Totem Refill Mod
 
-A production-ready Minecraft Fabric client-side mod (1.21.10, Kotlin) that automatically refills a Totem of Undying into your offhand after it pops, using tick-based delays to evade anti-cheat heuristics.
+A production-ready Minecraft Fabric client-side mod (1.21.10, Kotlin) that automatically refills a Totem of Undying into your offhand after it pops, using tick-based delays.
 
 ## Architecture Overview
 
