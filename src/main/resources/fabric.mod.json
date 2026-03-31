@@ -1,0 +1,45 @@
+{
+	"schemaVersion": 1,
+	"id": "inv-totem",
+	"version": "${version}",
+	"name": "Inv-Totem",
+	"description": "A client-side QoL macro mod that automatically refills a Totem of Undying into your offhand after it pops, using tick-based delays. It briefly opens your inventory, locates a totem, and moves it into your offhand slot before closing the inventory ensuring a smooth, near instant refill without requiring manual input",
+	"authors": [
+		"r3tr1x"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "MIT",
+	"icon": "assets/inv-totem/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			{
+				"value": "inv.totem.Invtotem",
+				"adapter": "kotlin"
+			}
+		],
+		"client": [
+			{
+				"value": "inv.totem.InvtotemClient",
+				"adapter": "kotlin"
+			}
+		]
+	},
+	"mixins": [
+		"inv-totem.mixins.json",
+		{
+			"config": "inv-totem.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.18.5",
+		"minecraft": "~1.21.10",
+		"java": ">=21",
+		"fabric-api": "*",
+		"fabric-language-kotlin": "*"
+	}
+}
