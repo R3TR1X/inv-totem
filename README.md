@@ -164,7 +164,7 @@ Key log messages:
 - Verify slot clicks are registered on server side
 
 ## License
-CC0-1.0 (Public Domain)
+MIT
 
 ## Author
 Built with Kotlin, Fabric API, and Mojang Mappings for Minecraft 1.21.10
