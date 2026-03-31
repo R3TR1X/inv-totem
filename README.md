@@ -158,7 +158,7 @@ Key log messages:
 - Check `enabled: true` in config
 - Review logs for "Totem not found" warning
 
-**Server anti-cheat triggering?**
+**anti-cheat-trigguring?**
 - Increase `swapDelayMs` (try 150-200ms)
 - Ensure inventory opens/closes visibly (not teleporting)
 - Verify slot clicks are registered on server side
@@ -167,4 +167,5 @@ Key log messages:
 MIT
 
 ## Author
-Built with Kotlin, Fabric API, and Mojang Mappings for Minecraft 1.21.10
+r3tr1x
+
