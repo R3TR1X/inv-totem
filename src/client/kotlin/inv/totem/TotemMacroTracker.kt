@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory
  */
 object TotemMacroTracker {
 	private val logger = LoggerFactory.getLogger("inv-totem-tracker")
+	private const val MAX_CURSOR_WAIT_TICKS = 6
 	
 	/**
 	 * State machine for the totem replacement sequence.
@@ -88,6 +89,7 @@ object TotemMacroTracker {
 				val requiredTicks = if (ConfigManager.isInstantClickTotemEnabled()) 1 else 2
 				if (tickCounter >= requiredTicks) {
 					currentState = State.SCANNING_FOR_TOTEM
+					tickCounter = 0
 					logger.info("Safety buffer complete, scanning for totem")
 				}
 				tickCounter++
@@ -95,7 +97,13 @@ object TotemMacroTracker {
 			
 			State.SCANNING_FOR_TOTEM -> {
 				if (!player.inventoryMenu.carried.isEmpty) {
-					abortSequence(client, "Inventory cursor is already carrying an item, aborting auto-swap for safety")
+					if (tickCounter >= MAX_CURSOR_WAIT_TICKS) {
+						abortSequence(client, "Inventory cursor stayed occupied too long before scanning, aborting auto-swap")
+						return
+					}
+
+					tickCounter++
+					logger.debug("Waiting for cursor to clear before scanning for totem")
 					return
 				}
 
@@ -130,7 +138,20 @@ object TotemMacroTracker {
 				// Click the totem slot in inventory
 				if (totemSlotIndex != -1) {
 					if (!player.inventoryMenu.carried.isEmpty) {
-						abortSequence(client, "Inventory cursor became occupied before the first click, aborting auto-swap")
+						if (player.inventoryMenu.carried.`is`(Items.TOTEM_OF_UNDYING)) {
+							currentState = State.SECOND_CLICK
+							tickCounter = 0
+							logger.debug("Cursor already carrying a totem, skipping to offhand click")
+							return
+						}
+
+						if (tickCounter >= MAX_CURSOR_WAIT_TICKS) {
+							abortSequence(client, "Inventory cursor stayed occupied before first click, aborting auto-swap")
+							return
+						}
+
+						tickCounter++
+						logger.debug("Waiting for cursor to clear before first click")
 						return
 					}
 
@@ -158,7 +179,13 @@ object TotemMacroTracker {
 			State.SECOND_CLICK -> {
 				// Click the offhand slot (slot 45)
 				if (player.inventoryMenu.carried.isEmpty) {
-					abortSequence(client, "Expected to be carrying the totem before the offhand click, aborting auto-swap")
+					if (tickCounter >= MAX_CURSOR_WAIT_TICKS) {
+						abortSequence(client, "Expected to be carrying the totem before offhand click, but cursor stayed empty")
+						return
+					}
+
+					tickCounter++
+					logger.debug("Waiting for totem to appear on cursor before offhand click")
 					return
 				}
 
