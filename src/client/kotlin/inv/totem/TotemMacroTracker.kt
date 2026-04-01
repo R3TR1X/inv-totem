@@ -201,6 +201,7 @@ object TotemMacroTracker {
 
 				if (offhandHasTotem && !carryingItem) {
 					currentState = State.CLOSING_INVENTORY
+					tickCounter = 0
 				} else {
 					if (carryingItem) {
 						performClick(client, 45)
@@ -217,10 +218,14 @@ object TotemMacroTracker {
 			}
 			
 			State.CLOSING_INVENTORY -> {
-				// Close the inventory
-				client.setScreen(null)
-				currentState = State.IDLE
-				logger.info("Inventory closed, totem replacement complete")
+				// Keep the inventory visible for a short moment so the swap is readable.
+				if (tickCounter >= 1) {
+					client.setScreen(null)
+					currentState = State.IDLE
+					logger.info("Inventory closed, totem replacement complete")
+				} else {
+					tickCounter++
+				}
 			}
 		}
 	}
