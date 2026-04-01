@@ -27,5 +27,19 @@ class LockedInventoryScreen(player: Player) : InventoryScreen(player) {
 		ScreenMouseEvents.allowMouseScroll(this).register { _, _, _, _, _ -> false }
 	}
 
+	override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean = true
+
+	override fun mouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean = true
+
+	override fun mouseDragged(mouseX: Double, mouseY: Double, button: Int, dragX: Double, dragY: Double): Boolean = true
+
+	override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontalAmount: Double, verticalAmount: Double): Boolean = true
+
+	override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean = true
+
+	override fun keyReleased(keyCode: Int, scanCode: Int, modifiers: Int): Boolean = true
+
+	override fun charTyped(codePoint: Char, modifiers: Int): Boolean = true
+
 	override fun shouldCloseOnEsc(): Boolean = false
 }
