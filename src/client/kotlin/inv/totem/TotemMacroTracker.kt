@@ -117,7 +117,7 @@ object TotemMacroTracker {
 			State.WAITING_FOR_SWAP_DELAY -> {
 				// Wait for the configured swap delay
 				val delayMs = ConfigManager.getSwapDelayMs()
-				val delayTicks = maxOf(1, (delayMs + 25) / 50)
+				val delayTicks = if (ConfigManager.isInstantClickTotemEnabled()) 1 else maxOf(1, (delayMs + 25) / 50)
 				if (tickCounter >= delayTicks) {
 					currentState = State.FIRST_CLICK
 					tickCounter = 0
