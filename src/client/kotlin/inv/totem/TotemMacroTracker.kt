@@ -26,6 +26,7 @@ object TotemMacroTracker {
 		FIRST_CLICK,                // Clicking the totem in inventory
 		CLICK_COOLDOWN,             // Brief delay between first and second click
 		SECOND_CLICK,               // Clicking the offhand slot
+		VERIFY_OFFHAND,             // Verifying server accepted offhand placement
 		CLOSING_INVENTORY,          // Closing the inventory screen
 	}
 	
@@ -77,20 +78,15 @@ object TotemMacroTracker {
 			State.INVENTORY_OPENING -> {
 				// Open the inventory screen
 				client.setScreen(LockedInventoryScreen(player))
-				if (ConfigManager.isInstantClickTotemEnabled()) {
-					currentState = State.SCANNING_FOR_TOTEM
-					logger.info("Opened inventory screen and skipping safety buffer for instant mode")
-				} else {
-					currentState = State.SAFETY_BUFFER
-					tickCounter = 0
-					logger.info("Opened inventory screen")
-				}
+				currentState = State.SAFETY_BUFFER
+				tickCounter = 0
+				logger.info("Opened inventory screen")
 			}
 			
 			State.SAFETY_BUFFER -> {
-				// Wait 75ms (approximately 1-2 ticks at 20 TPS) for server to register screen opening
-				// At 20 ticks/sec, each tick is ~50ms, so 2 ticks = ~100ms > 75ms
-				if (tickCounter >= 2) {
+				// Instant mode keeps a shorter sync buffer instead of skipping it to reduce desync.
+				val requiredTicks = if (ConfigManager.isInstantClickTotemEnabled()) 1 else 2
+				if (tickCounter >= requiredTicks) {
 					currentState = State.SCANNING_FOR_TOTEM
 					logger.info("Safety buffer complete, scanning for totem")
 				}
@@ -108,18 +104,8 @@ object TotemMacroTracker {
 				if (inventorySlot != -1) {
 					totemSlotIndex = inventorySlot
 					logger.info("Found totem at slot: $totemSlotIndex")
-
-					if (ConfigManager.isInstantClickTotemEnabled()) {
-						performClick(client, totemSlotIndex)
-						performClick(client, 45)
-						client.setScreen(null)
-						currentState = State.IDLE
-						tickCounter = 0
-						logger.info("Instant Click Totem is enabled, performing full swap immediately")
-					} else {
-						currentState = State.WAITING_FOR_SWAP_DELAY
-						tickCounter = 0
-					}
+					currentState = State.WAITING_FOR_SWAP_DELAY
+					tickCounter = 0
 				} else {
 					// Totem not found, close inventory and abort
 					client.setScreen(null)
@@ -131,7 +117,7 @@ object TotemMacroTracker {
 			State.WAITING_FOR_SWAP_DELAY -> {
 				// Wait for the configured swap delay
 				val delayMs = ConfigManager.getSwapDelayMs()
-				val delayTicks = maxOf(1, (delayMs + 25) / 50)  // Restore original timing: 0ms still waits one tick
+				val delayTicks = if (ConfigManager.isInstantClickTotemEnabled()) 0 else maxOf(1, (delayMs + 25) / 50)
 				if (tickCounter >= delayTicks) {
 					currentState = State.FIRST_CLICK
 					tickCounter = 0
@@ -177,8 +163,30 @@ object TotemMacroTracker {
 				}
 
 				performClick(client, 45)
-				currentState = State.CLOSING_INVENTORY
+				currentState = State.VERIFY_OFFHAND
+				tickCounter = 0
 				logger.debug("Clicked offhand slot 45")
+			}
+
+			State.VERIFY_OFFHAND -> {
+				val offhandHasTotem = player.offhandItem.`is`(Items.TOTEM_OF_UNDYING)
+				val carryingItem = !player.inventoryMenu.carried.isEmpty
+
+				if (offhandHasTotem && !carryingItem) {
+					currentState = State.CLOSING_INVENTORY
+				} else {
+					if (carryingItem) {
+						performClick(client, 45)
+						logger.warn("Offhand placement not confirmed yet, retrying offhand click")
+					}
+
+					if (tickCounter >= 4) {
+						abortSequence(client, "Failed to verify totem in offhand after swap, aborting")
+						return
+					}
+
+					tickCounter++
+				}
 			}
 			
 			State.CLOSING_INVENTORY -> {
