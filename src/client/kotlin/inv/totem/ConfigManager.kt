@@ -35,7 +35,12 @@ object ConfigManager {
 		/**
 		 * Enable/disable the auto-totem feature.
 		 */
-		var enabled: Boolean = true
+		var enabled: Boolean = true,
+
+		/**
+		 * Enable verbose state-machine logs for troubleshooting.
+		 */
+		var debugMode: Boolean = false
 	)
 	
 	/**
@@ -52,7 +57,7 @@ object ConfigManager {
 				config = gson.fromJson(json, TotemConfig::class.java) ?: TotemConfig()
 				config.swapDelayMs = config.swapDelayMs.coerceIn(0, 500)
 				logger.info(
-					"Loaded config: swapDelayMs=${config.swapDelayMs}, instantClickTotem=${config.instantClickTotem}, enabled=${config.enabled}"
+					"Loaded config: swapDelayMs=${config.swapDelayMs}, instantClickTotem=${config.instantClickTotem}, enabled=${config.enabled}, debugMode=${config.debugMode}"
 				)
 			}
 		} catch (e: Exception) {
@@ -115,6 +120,19 @@ object ConfigManager {
 	 */
 	fun setEnabled(enabled: Boolean) {
 		config.enabled = enabled
+		saveConfig()
+	}
+
+	/**
+	 * Check if debug mode is enabled.
+	 */
+	fun isDebugModeEnabled(): Boolean = config.debugMode
+
+	/**
+	 * Enable or disable debug mode.
+	 */
+	fun setDebugModeEnabled(enabled: Boolean) {
+		config.debugMode = enabled
 		saveConfig()
 	}
 }

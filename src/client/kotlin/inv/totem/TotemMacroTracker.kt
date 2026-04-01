@@ -35,6 +35,7 @@ object TotemMacroTracker {
 	private var tickCounter: Int = 0
 	private var totemSlotIndex: Int = -1
 	private var lastOffhandHadTotem: Boolean? = null
+	private var lastStateForDebug: State = State.IDLE
 	
 	init {
 		logger.info("TotemMacroTracker initialized")
@@ -46,6 +47,11 @@ object TotemMacroTracker {
 	fun onClientTick() {
 		if (!ConfigManager.isEnabled()) {
 			return
+		}
+
+		if (ConfigManager.isDebugModeEnabled() && currentState != lastStateForDebug) {
+			logger.info("[debug] State transition: $lastStateForDebug -> $currentState")
+			lastStateForDebug = currentState
 		}
 		
 		val client = Minecraft.getInstance()
@@ -103,7 +109,7 @@ object TotemMacroTracker {
 					}
 
 					tickCounter++
-					logger.debug("Waiting for cursor to clear before scanning for totem")
+					debugLog("Waiting for cursor to clear before scanning for totem")
 					return
 				}
 
@@ -141,7 +147,7 @@ object TotemMacroTracker {
 						if (player.inventoryMenu.carried.`is`(Items.TOTEM_OF_UNDYING)) {
 							currentState = State.SECOND_CLICK
 							tickCounter = 0
-							logger.debug("Cursor already carrying a totem, skipping to offhand click")
+							debugLog("Cursor already carrying a totem, skipping to offhand click")
 							return
 						}
 
@@ -151,14 +157,14 @@ object TotemMacroTracker {
 						}
 
 						tickCounter++
-						logger.debug("Waiting for cursor to clear before first click")
+						debugLog("Waiting for cursor to clear before first click")
 						return
 					}
 
 					performClick(client, totemSlotIndex)
 					currentState = State.CLICK_COOLDOWN
 					tickCounter = 0
-					logger.debug("Clicked totem at slot $totemSlotIndex")
+					debugLog("Clicked totem at slot $totemSlotIndex")
 				} else {
 					// Something went wrong, abort
 					client.setScreen(null)
@@ -185,14 +191,14 @@ object TotemMacroTracker {
 					}
 
 					tickCounter++
-					logger.debug("Waiting for totem to appear on cursor before offhand click")
+					debugLog("Waiting for totem to appear on cursor before offhand click")
 					return
 				}
 
 				performClick(client, 45)
 				currentState = State.VERIFY_OFFHAND
 				tickCounter = 0
-				logger.debug("Clicked offhand slot 45")
+				debugLog("Clicked offhand slot 45")
 			}
 
 			State.VERIFY_OFFHAND -> {
@@ -289,6 +295,12 @@ object TotemMacroTracker {
 		tickCounter = 0
 		totemSlotIndex = -1
 		logger.warn(message)
+	}
+
+	private fun debugLog(message: String) {
+		if (ConfigManager.isDebugModeEnabled()) {
+			logger.info("[debug] $message")
+		}
 	}
 }
 

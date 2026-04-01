@@ -7,6 +7,8 @@ Modrinth: https://modrinth.com/mod/inv-totem
 
 curseforge: https://legacy.curseforge.com/minecraft/mc-mods/inv-totem
 
+Issues: https://github.com/R3TR1X/inv-totem/issues
+
 ## Architecture Overview
 
 ### Core Components
@@ -15,14 +17,18 @@ curseforge: https://legacy.curseforge.com/minecraft/mc-mods/inv-totem
 Manages JSON-based configuration stored at `~/.minecraft/config/inv-totem-config.json`.
 
 **Configuration Options:**
-- `swapDelayMs` (int, default: 100ms, range: 0-1000ms): Delay before clicking the totem slot. Adjust to balance anti-cheat evasion vs. responsiveness.
+- `swapDelayMs` (int, default: 100ms, range: 0-500ms): Delay before clicking the totem slot. Adjust to balance anti-cheat evasion vs. responsiveness.
+- `instantClickTotem` (bool, default: false): Uses a fixed fast path with safety guards for fast refill.
 - `enabled` (bool, default: true): Toggle the feature on/off.
+- `debugMode` (bool, default: false): Enables verbose state-machine logs for troubleshooting.
 
 **Example Config:**
 ```json
 {
   "swapDelayMs": 100,
-  "enabled": true
+  "instantClickTotem": false,
+  "enabled": true,
+  "debugMode": false
 }
 ```
 
@@ -101,11 +107,15 @@ Edit `~/.minecraft/config/inv-totem-config.json`:
 ```json
 {
   "swapDelayMs": 75,
-  "enabled": true
+  "instantClickTotem": false,
+  "enabled": true,
+  "debugMode": false
 }
 ```
 - Lower values (25-50ms): Faster auto-swap, higher detection risk
 - Higher values (150-250ms): Slower auto-swap, safer on strict servers
+- `instantClickTotem: true`: Uses a 1-tick fast path before first click
+- `debugMode: true`: Adds detailed `[debug]` logs to help diagnose edge cases
 
 ### 4. Use
 Simply play with a Totem of Undying in your inventory. When the totem pops, the mod automatically:

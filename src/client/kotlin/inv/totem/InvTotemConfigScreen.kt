@@ -17,14 +17,16 @@ private fun delayMsToSliderValue(delayMs: Int): Double {
 class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.literal("Inv-Totem Config")) {
 	private var selectedDelayMs = ConfigManager.getSwapDelayMs()
 	private var instantClickTotemEnabled = ConfigManager.isInstantClickTotemEnabled()
+	private var debugModeEnabled = ConfigManager.isDebugModeEnabled()
 
 	override fun init() {
 		super.init()
 
 		val sliderWidth = 220
 		val sliderX = (width - sliderWidth) / 2
-		val toggleY = height / 2 - 10
-		val sliderY = height / 2 + 28
+		val toggleY = height / 2 - 24
+		val debugToggleY = toggleY + 24
+		val sliderY = debugToggleY + 38
 		val titleText = Component.literal("INV-TOTEM CONFIG")
 		val titleWidget = StringWidget(titleText, font).setColor(0xFFFFFF)
 		titleWidget.setX((width - titleWidget.width) / 2)
@@ -40,6 +42,13 @@ class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.
 		)
 
 		addRenderableWidget(
+			Button.builder(debugModeButtonLabel()) { button ->
+				debugModeEnabled = !debugModeEnabled
+				button.setMessage(debugModeButtonLabel())
+			}.bounds(sliderX, debugToggleY, sliderWidth, 20).build()
+		)
+
+		addRenderableWidget(
 			DelaySliderButton(sliderX, sliderY, sliderWidth, selectedDelayMs) { delayMs ->
 				selectedDelayMs = delayMs
 			}
@@ -48,7 +57,7 @@ class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.
 		addRenderableWidget(
 			Button.builder(Component.literal("Done")) {
 				saveAndClose()
-			}.bounds((width - 200) / 2, sliderY + 42, 200, 20).build()
+			}.bounds((width - 200) / 2, sliderY + 44, 200, 20).build()
 		)
 	}
 
@@ -64,12 +73,18 @@ class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.
 	private fun saveAndClose() {
 		ConfigManager.setSwapDelayMs(selectedDelayMs)
 		ConfigManager.setInstantClickTotemEnabled(instantClickTotemEnabled)
+		ConfigManager.setDebugModeEnabled(debugModeEnabled)
 		minecraft?.setScreen(parentScreen)
 	}
 
 	private fun instantClickButtonLabel(): Component {
 		val stateText = if (instantClickTotemEnabled) "Enabled" else "Disabled"
 		return Component.literal("Instant Click Totem: $stateText")
+	}
+
+	private fun debugModeButtonLabel(): Component {
+		val stateText = if (debugModeEnabled) "Enabled" else "Disabled"
+		return Component.literal("Debug Mode: $stateText")
 	}
 }
 
