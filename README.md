@@ -2,6 +2,10 @@
 
 A production-ready Minecraft Fabric client-side mod (1.21.10, Kotlin) that automatically refills a Totem of Undying into your offhand after it pops, using tick-based delays.
 
+## Mod Pages
+Modrinth: https://modrinth.com/mod/inv-totem
+curseforge: https://legacy.curseforge.com/minecraft/mc-mods/inv-totem
+
 ## Architecture Overview
 
 ### Core Components
