@@ -4,6 +4,7 @@ A production-ready Minecraft Fabric client-side mod (1.21.10, Kotlin) that autom
 
 ## Mod Pages
 Modrinth: https://modrinth.com/mod/inv-totem
+
 curseforge: https://legacy.curseforge.com/minecraft/mc-mods/inv-totem
 
 ## Architecture Overview
