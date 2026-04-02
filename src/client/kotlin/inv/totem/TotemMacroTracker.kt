@@ -13,50 +13,45 @@ import org.slf4j.LoggerFactory
  */
 object TotemMacroTracker {
 	private val logger = LoggerFactory.getLogger("inv-totem-tracker")
-	private const val MAX_CURSOR_WAIT_TICKS = 6
-	private const val MAX_VERIFY_RETRIES = 6
-	private const val MAX_INTERRUPTION_RECOVERY = 3
-	private const val MAX_STASH_RETRIES = 2
-	private const val POST_ATTEMPT_WATCH_TICKS = 8
-	private const val POST_ATTEMPT_RETRIES = 2
-
+	private const val MIN_ACTION_GAP_TICKS = 2L
+	private const val VERIFY_DELAY_TICKS = 3L
+	private const val MAX_VERIFY_RETRIES = 3
+	
 	/**
 	 * State machine for the totem replacement sequence.
 	 */
 	private enum class State {
-		IDLE,
-		INVENTORY_OPENING,
-		SAFETY_BUFFER,
-		SCANNING_FOR_TOTEM,
-		WAITING_FOR_SWAP_DELAY,
-		FIRST_CLICK,
-		CLICK_COOLDOWN,
-		SECOND_CLICK,
-		PREPARE_TARGET_SLOT,
-		STASH_BLOCKER,
-		POST_TARGET_SYNC,
-		VERIFY_OFFHAND,
-		CLOSING_INVENTORY,
+		IDLE,                       // Waiting for totem pop
+		INVENTORY_OPENING,          // Opening the inventory screen
+		SAFETY_BUFFER,              // Waiting 75ms for server sync
+		SCANNING_FOR_TOTEM,         // Looking for totem in inventory
+		WAITING_FOR_SWAP_DELAY,     // Waiting for configured delay before clicking
+		FIRST_CLICK,                // Clicking the totem in inventory
+		CLICK_COOLDOWN,             // Brief delay between first and second click
+		SECOND_CLICK,               // Clicking the offhand slot
+		CLOSING_INVENTORY,          // Closing the inventory screen
 	}
-
+	
 	private var currentState: State = State.IDLE
 	private var tickCounter: Int = 0
 	private var totemSlotIndex: Int = -1
-	private var sequenceTargetSlotIndex: Int = 45
-	private var pendingStashSlotIndex: Int = -1
-	private var verifyRetries: Int = 0
-	private var interruptionRecoveryCount: Int = 0
-	private var lastTargetHadTotem: Boolean? = null
-	private var lastItemSlotReplaceMode: Boolean? = null
-	private var lastStateForDebug: State = State.IDLE
-	private var retryWatchTicks: Int = 0
-	private var retryBudget: Int = 0
-	private var lastAttemptTargetSlotIndex: Int = 45
+	private var lastOffhandHadTotem: Boolean? = null
+	private var macroTick: Long = 0L
+	private var lastActionTick: Long = -9999L
+	private var deferUntilTick: Long = 0L
 
+	private data class VerifyTask(
+		var targetSlot: Int,
+		var checkAtTick: Long,
+		var retriesLeft: Int,
+	)
+
+	private var verifyTask: VerifyTask? = null
+	
 	init {
 		logger.info("TotemMacroTracker initialized")
 	}
-
+	
 	/**
 	 * Called every client tick. Manages the state machine for totem replacement.
 	 */
@@ -64,93 +59,98 @@ object TotemMacroTracker {
 		if (!ConfigManager.isEnabled()) {
 			return
 		}
-
-		if (ConfigManager.isDebugModeEnabled() && currentState != lastStateForDebug) {
-			logger.info("[debug] State transition: $lastStateForDebug -> $currentState")
-			lastStateForDebug = currentState
-		}
-
+		
 		val client = Minecraft.getInstance()
 		val player = client.player ?: return
-		val itemSlotReplaceMode = ConfigManager.isItemSlotReplaceEnabled()
-		val dynamicTargetSlot = getTargetSlotIndex()
-		val currentTargetHasTotem = doesTargetContainTotem(player, dynamicTargetSlot)
+		
+		// END_CLIENT_TICK is the safest phase: vanilla pickup updates have already been applied.
+		macroTick++
+		processVerifyQueue(player)
 
-		// If target mode changed at runtime, resync detection baseline to avoid false pop events.
-		if (lastItemSlotReplaceMode != itemSlotReplaceMode) {
-			lastTargetHadTotem = currentTargetHasTotem
-			lastItemSlotReplaceMode = itemSlotReplaceMode
+		if (macroTick < deferUntilTick) {
+			return
 		}
-
-		// Detect totem use: target slot/offhand was totem and now isn't.
-		if (lastTargetHadTotem == true && !currentTargetHasTotem && currentState == State.IDLE) {
-			if (!isAutoSelectConditionMet(player, dynamicTargetSlot)) {
-				debugLog("Auto Select condition blocked sequence start for ${targetSlotLabel(dynamicTargetSlot)}")
-			} else {
-				logger.info("Totem pop detected! ${targetSlotLabel(dynamicTargetSlot)} no longer contains a totem.")
-				startSequenceForTarget(dynamicTargetSlot)
+		
+		// Detect when the offhand transitions away from a totem.
+		val currentOffhandHasTotem = player.offhandItem.`is`(Items.TOTEM_OF_UNDYING)
+		
+		// Detect totem pop: offhand was totem, now it's not
+		if (lastOffhandHadTotem == true && !currentOffhandHasTotem) {
+			logger.info("Totem pop detected! Offhand no longer contains a totem.")
+			if (currentState == State.IDLE) {
+				currentState = State.INVENTORY_OPENING
+				tickCounter = 0
+				totemSlotIndex = -1
 			}
 		}
-
-		lastTargetHadTotem = currentTargetHasTotem
-
-		if (currentState == State.IDLE) {
-			handlePostAttemptRetry(client, player)
-		}
+		
+		lastOffhandHadTotem = currentOffhandHasTotem
 
 		if (currentState != State.IDLE) {
 			suppressHeldInputs(client)
 		}
-
+		
+		// State machine execution
 		when (currentState) {
 			State.IDLE -> {
-				// No action; waiting for pop detection.
+				// Do nothing, wait for totem pop
 			}
-
+			
 			State.INVENTORY_OPENING -> {
+				// Open the inventory screen
 				client.setScreen(LockedInventoryScreen(player))
-				currentState = State.SAFETY_BUFFER
-				tickCounter = 0
-				logger.info("Opened inventory screen")
-			}
-
-			State.SAFETY_BUFFER -> {
-				val requiredTicks = if (ConfigManager.isInstantClickTotemEnabled()) 1 else 2
-				if (tickCounter >= requiredTicks) {
+				if (ConfigManager.isInstantClickTotemEnabled()) {
 					currentState = State.SCANNING_FOR_TOTEM
+					logger.info("Opened inventory screen and skipping safety buffer for instant mode")
+				} else {
+					currentState = State.SAFETY_BUFFER
 					tickCounter = 0
+					logger.info("Opened inventory screen")
+				}
+			}
+			
+			State.SAFETY_BUFFER -> {
+				// Wait 75ms (approximately 1-2 ticks at 20 TPS) for server to register screen opening
+				// At 20 ticks/sec, each tick is ~50ms, so 2 ticks = ~100ms > 75ms
+				if (tickCounter >= 2) {
+					currentState = State.SCANNING_FOR_TOTEM
 					logger.info("Safety buffer complete, scanning for totem")
 				}
 				tickCounter++
 			}
-
+			
 			State.SCANNING_FOR_TOTEM -> {
-				if (!player.inventoryMenu.carried.isEmpty) {
-					if (tickCounter >= MAX_CURSOR_WAIT_TICKS) {
-						recoverFromInterruption(client, "Cursor remained occupied before scan")
-						return
-					}
-
-					tickCounter++
-					debugLog("Waiting for cursor to clear before scanning for totem")
+				if (!ensureReadyBeforeSwap(client, player, expectTotemOnCursor = false)) {
+					scheduleNextTick("cursor not clean before scan", player)
 					return
 				}
 
+				// Scan inventory for totem of undying
 				val inventorySlot = findTotemInInventory(player)
 				if (inventorySlot != -1) {
 					totemSlotIndex = inventorySlot
-					currentState = State.WAITING_FOR_SWAP_DELAY
-					tickCounter = 0
 					logger.info("Found totem at slot: $totemSlotIndex")
+
+					if (ConfigManager.isInstantClickTotemEnabled()) {
+						currentState = State.FIRST_CLICK
+						tickCounter = 0
+						logger.info("Instant Click Totem is enabled, starting headless swap path")
+					} else {
+						currentState = State.WAITING_FOR_SWAP_DELAY
+						tickCounter = 0
+					}
 				} else {
-					abortSequence(client, "Totem not found in inventory, aborting")
+					// Totem not found, close inventory and abort
+					client.setScreen(null)
+					currentState = State.IDLE
+					logger.warn("Totem not found in inventory, aborting")
 				}
 			}
-
+			
 			State.WAITING_FOR_SWAP_DELAY -> {
-				// Item-slot mode uses the same global delay path as offhand mode.
+				// Wait for the configured swap delay
 				val delayMs = ConfigManager.getSwapDelayMs()
-				val delayTicks = if (ConfigManager.isInstantClickTotemEnabled()) 1 else maxOf(1, (delayMs + 25) / 50)
+				val delayTicks = maxOf(1, (delayMs + 25) / 50)  // Restore original timing: 0ms still waits one tick
 				if (tickCounter >= delayTicks) {
 					currentState = State.FIRST_CLICK
 					tickCounter = 0
@@ -158,298 +158,129 @@ object TotemMacroTracker {
 				}
 				tickCounter++
 			}
-
+			
 			State.FIRST_CLICK -> {
-				if (totemSlotIndex == -1) {
-					abortSequence(client, "Totem slot index became invalid")
-					return
-				}
-
-				if (!player.inventoryMenu.carried.isEmpty) {
-					if (player.inventoryMenu.carried.`is`(Items.TOTEM_OF_UNDYING)) {
-						currentState = State.SECOND_CLICK
-						tickCounter = 0
-						debugLog("Cursor already carrying a totem, skipping to target click")
+				// Click the totem slot in inventory
+				if (totemSlotIndex != -1) {
+					if (!ensureReadyBeforeSwap(client, player, expectTotemOnCursor = false)) {
+						scheduleNextTick("cursor became occupied before first click", player)
+						currentState = State.SCANNING_FOR_TOTEM
 						return
 					}
 
-					if (tickCounter >= MAX_CURSOR_WAIT_TICKS) {
-						recoverFromInterruption(client, "Cursor stayed occupied before first click")
+					val syncId = currentSyncId(player)
+					if (!performClick(client, totemSlotIndex, syncId, "pickup-totem")) {
+						scheduleNextTick("first click throttled or sync mismatch", player)
 						return
 					}
-
-					tickCounter++
-					debugLog("Waiting for cursor to clear before first click")
-					return
+					currentState = State.CLICK_COOLDOWN
+					tickCounter = 0
+					logger.debug("Clicked totem at slot $totemSlotIndex")
+				} else {
+					// Something went wrong, abort
+					client.setScreen(null)
+					currentState = State.IDLE
+					logger.error("Totem slot index is invalid")
 				}
-
-				performClick(client, totemSlotIndex)
-				currentState = State.CLICK_COOLDOWN
-				tickCounter = 0
-				debugLog("Clicked totem at slot $totemSlotIndex")
 			}
-
+			
 			State.CLICK_COOLDOWN -> {
+				// Brief delay between first and second click (1 tick = ~50ms)
 				if (tickCounter >= 1) {
 					currentState = State.SECOND_CLICK
 					tickCounter = 0
 				}
 				tickCounter++
 			}
-
+			
 			State.SECOND_CLICK -> {
-				if (player.inventoryMenu.carried.isEmpty) {
-					if (tickCounter >= MAX_CURSOR_WAIT_TICKS) {
-						recoverFromInterruption(client, "Expected to carry totem before target click, but cursor stayed empty")
-						return
-					}
-
-					tickCounter++
-					debugLog("Waiting for totem to appear on cursor before target click")
+				// Click the offhand slot (slot 45)
+				if (!ensureReadyBeforeSwap(client, player, expectTotemOnCursor = true)) {
+					scheduleNextTick("cursor changed before offhand click", player)
+					currentState = State.SCANNING_FOR_TOTEM
 					return
 				}
 
-				if (!player.inventoryMenu.carried.`is`(Items.TOTEM_OF_UNDYING)) {
-					recoverFromInterruption(client, "Cursor item changed before target click (possible pickup interference)")
+				val syncId = currentSyncId(player)
+				if (!performClick(client, 45, syncId, "place-offhand")) {
+					scheduleNextTick("second click throttled or sync mismatch", player)
 					return
 				}
 
-				currentState = State.PREPARE_TARGET_SLOT
-				tickCounter = 0
+				verifyTask = VerifyTask(
+					targetSlot = 45,
+					checkAtTick = macroTick + VERIFY_DELAY_TICKS,
+					retriesLeft = MAX_VERIFY_RETRIES,
+				)
+				logger.info("Scheduled post-swap verification at tick ${macroTick + VERIFY_DELAY_TICKS} (syncId=$syncId)")
+				currentState = State.CLOSING_INVENTORY
+				logger.debug("Clicked offhand slot 45")
 			}
-
-			State.PREPARE_TARGET_SLOT -> {
-				if (!player.inventoryMenu.carried.`is`(Items.TOTEM_OF_UNDYING)) {
-					recoverFromInterruption(client, "Lost carried totem before target placement")
-					return
-				}
-
-				val targetStack = getTargetStack(player, sequenceTargetSlotIndex)
-				val targetBlocked = !targetStack.isEmpty && !targetStack.`is`(Items.TOTEM_OF_UNDYING)
-
-				if (targetBlocked) {
-					// Swap blocker out first so totem can be placed, then stash blocker safely.
-					performClick(client, sequenceTargetSlotIndex)
-
-					if (player.inventoryMenu.carried.isEmpty || player.inventoryMenu.carried.`is`(Items.TOTEM_OF_UNDYING)) {
-						recoverFromInterruption(client, "Target blocker swap did not produce expected carried blocker item")
-						return
-					}
-
-					pendingStashSlotIndex = findStashSlot(player, sequenceTargetSlotIndex)
-					if (pendingStashSlotIndex == -1) {
-						recoverFromInterruption(client, "No empty slot available to stash blocker item")
-						return
-					}
-
-					currentState = State.STASH_BLOCKER
-					tickCounter = 0
-					debugLog("Target occupied, stashing blocker from ${targetSlotLabel(sequenceTargetSlotIndex)}")
-					return
-				}
-
-				performClick(client, sequenceTargetSlotIndex)
-				currentState = State.POST_TARGET_SYNC
-				tickCounter = 0
-				verifyRetries = 0
-				debugLog("Clicked ${targetSlotLabel(sequenceTargetSlotIndex)}")
-			}
-
-			State.STASH_BLOCKER -> {
-				if (player.inventoryMenu.carried.isEmpty) {
-					currentState = State.POST_TARGET_SYNC
-					tickCounter = 0
-					verifyRetries = 0
-					return
-				}
-
-				if (player.inventoryMenu.carried.`is`(Items.TOTEM_OF_UNDYING)) {
-					recoverFromInterruption(client, "Unexpected totem returned to cursor while stashing blocker")
-					return
-				}
-
-				val stashSlot = if (pendingStashSlotIndex != -1) pendingStashSlotIndex else findStashSlot(player, sequenceTargetSlotIndex)
-				if (stashSlot == -1) {
-					recoverFromInterruption(client, "Unable to find stash slot for blocker item")
-					return
-				}
-
-				performClick(client, stashSlot)
-				if (!player.inventoryMenu.carried.isEmpty) {
-					if (tickCounter >= MAX_STASH_RETRIES) {
-						recoverFromInterruption(client, "Failed to stash blocker item after retries")
-						return
-					}
-
-					pendingStashSlotIndex = findStashSlot(player, sequenceTargetSlotIndex)
-					tickCounter++
-					debugLog("Retrying blocker stash")
-					return
-				}
-
-				pendingStashSlotIndex = -1
-				currentState = State.POST_TARGET_SYNC
-				tickCounter = 0
-				verifyRetries = 0
-			}
-
-			State.POST_TARGET_SYNC -> {
-				// Give server extra ticks for hotbar target updates to reduce ghost cursor desync.
-				val requiredTicks = if (sequenceTargetSlotIndex in 0..8) 2 else 1
-				if (tickCounter >= requiredTicks) {
-					currentState = State.VERIFY_OFFHAND
-					tickCounter = 0
-				} else {
-					tickCounter++
-				}
-			}
-
-			State.VERIFY_OFFHAND -> {
-				val targetHasTotem = doesTargetContainTotem(player, sequenceTargetSlotIndex)
-				val carried = player.inventoryMenu.carried
-
-				if (targetHasTotem && carried.isEmpty) {
-					currentState = State.CLOSING_INVENTORY
-					tickCounter = 0
-					return
-				}
-
-				if (!carried.isEmpty && !carried.`is`(Items.TOTEM_OF_UNDYING)) {
-					recoverFromInterruption(client, "Cursor changed to non-totem during verify (pickup interference)")
-					return
-				}
-
-				if (!carried.isEmpty && carried.`is`(Items.TOTEM_OF_UNDYING)) {
-					performClick(client, sequenceTargetSlotIndex)
-					debugLog("Retry click on ${targetSlotLabel(sequenceTargetSlotIndex)} while carrying totem")
-				}
-
-				if (verifyRetries >= MAX_VERIFY_RETRIES) {
-					recoverFromInterruption(client, "Failed to verify totem in ${targetSlotLabel(sequenceTargetSlotIndex)}")
-					return
-				}
-
-				verifyRetries++
-				tickCounter++
-			}
-
+			
 			State.CLOSING_INVENTORY -> {
-				if (tickCounter >= 1) {
-					schedulePostAttemptWatch(sequenceTargetSlotIndex)
-					client.setScreen(null)
-					currentState = State.IDLE
-					logger.info("Inventory closed, totem replacement complete")
-				} else {
-					tickCounter++
-				}
+				// Close the inventory
+				client.setScreen(null)
+				currentState = State.IDLE
+				logger.info("Inventory closed, totem replacement complete")
 			}
 		}
 	}
-
-	private fun startSequenceForTarget(targetSlotIndex: Int) {
-		currentState = State.INVENTORY_OPENING
-		tickCounter = 0
-		totemSlotIndex = -1
-		pendingStashSlotIndex = -1
-		verifyRetries = 0
-		interruptionRecoveryCount = 0
-		sequenceTargetSlotIndex = targetSlotIndex
-		lastAttemptTargetSlotIndex = targetSlotIndex
-	}
-
-	private fun handlePostAttemptRetry(client: Minecraft, player: Player) {
-		if (retryWatchTicks <= 0 || retryBudget <= 0) {
-			return
-		}
-
-		retryWatchTicks--
-		if (doesTargetContainTotem(player, lastAttemptTargetSlotIndex)) {
-			return
-		}
-
-		if (!hasTotemInInventory(player)) {
-			return
-		}
-
-		if (!isAutoSelectConditionMet(player, lastAttemptTargetSlotIndex)) {
-			return
-		}
-
-		retryBudget--
-		logger.warn("Post-attempt check: target ${targetSlotLabel(lastAttemptTargetSlotIndex)} still missing totem, retrying swap")
-		startSequenceForTarget(lastAttemptTargetSlotIndex)
-		suppressHeldInputs(client)
-	}
-
-	private fun schedulePostAttemptWatch(targetSlotIndex: Int) {
-		lastAttemptTargetSlotIndex = targetSlotIndex
-		retryWatchTicks = POST_ATTEMPT_WATCH_TICKS
-		retryBudget = POST_ATTEMPT_RETRIES
-	}
-
-	private fun hasTotemInInventory(player: Player): Boolean {
-		for (i in 0..35) {
-			if (player.inventory.getItem(i).`is`(Items.TOTEM_OF_UNDYING)) {
-				return true
-			}
-		}
-		return false
-	}
-
-	private fun recoverFromInterruption(client: Minecraft, reason: String) {
-		val player = client.player
-		if (interruptionRecoveryCount < MAX_INTERRUPTION_RECOVERY) {
-			interruptionRecoveryCount++
-			if (player != null) {
-				normalizeCursor(client, player)
-			}
-			logger.warn("$reason. Retrying sequence ($interruptionRecoveryCount/$MAX_INTERRUPTION_RECOVERY)")
-			currentState = State.SCANNING_FOR_TOTEM
-			tickCounter = 0
-			totemSlotIndex = -1
-			pendingStashSlotIndex = -1
-			verifyRetries = 0
-			return
-		}
-
-		abortSequence(client, "$reason. Recovery attempts exhausted")
-	}
-
+	
 	/**
 	 * Scans the player's main inventory (slots 0-35) for a Totem of Undying.
 	 * Returns the slot index (0-35) if found, or -1 if not found.
 	 */
 	private fun findTotemInInventory(player: Player): Int {
+		val inventory = player.inventory
+		// Scan main inventory slots (0-35)
 		for (i in 0..35) {
-			if (player.inventory.getItem(i).`is`(Items.TOTEM_OF_UNDYING)) {
+			val itemStack = inventory.getItem(i)
+			if (itemStack.`is`(Items.TOTEM_OF_UNDYING)) {
 				return i
 			}
 		}
 		return -1
 	}
-
+	
 	/**
 	 * Performs a click on a specific slot in the player inventory.
-	 * This is headless and not tied to physical mouse coordinates.
+	 * Uses the interaction manager to simulate a left-click.
 	 */
-	private fun performClick(client: Minecraft, slotIndex: Int) {
+	private fun performClick(client: Minecraft, slotIndex: Int, expectedSyncId: Int, actionName: String): Boolean {
 		try {
 			val player = client.player ?: return
 			val gameMode = client.gameMode ?: return
-			suppressHeldInputs(client)
+			val currentSyncId = currentSyncId(player)
 
+			if (currentSyncId != expectedSyncId) {
+				logger.warn("Aborting $actionName at tick $macroTick due to syncId mismatch (expected=$expectedSyncId, actual=$currentSyncId)")
+				return false
+			}
+
+			if (macroTick - lastActionTick < MIN_ACTION_GAP_TICKS) {
+				logger.debug("Throttling $actionName at tick $macroTick; lastActionTick=$lastActionTick")
+				return false
+			}
+			
+			// Hotbar inventory indices (0-8) map to menu slots 36-44 in the player inventory screen.
 			gameMode.handleInventoryMouseClick(
-				player.inventoryMenu.containerId,
+				currentSyncId,
 				toMenuSlotIndex(slotIndex),
 				0,
 				ClickType.PICKUP,
 				player
 			)
+			lastActionTick = macroTick
+			return true
 		} catch (e: Exception) {
 			logger.error("Error during slot click", e)
+			return false
 		}
 	}
-
+	
+	/**
+	 * Converts inventory indices to the player menu slot indices used by click handling.
+	 */
 	private fun toMenuSlotIndex(slotIndex: Int): Int {
 		return when (slotIndex) {
 			in 0..8 -> slotIndex + 36
@@ -457,92 +288,108 @@ object TotemMacroTracker {
 		}
 	}
 
-	private fun getTargetSlotIndex(): Int {
-		return if (ConfigManager.isItemSlotReplaceEnabled()) {
-			ConfigManager.getItemSlotReplaceHotbarSlot() - 1
-		} else {
-			45
-		}
-	}
-
-	private fun isAutoSelectConditionMet(player: Player, targetSlotIndex: Int): Boolean {
-		if (!ConfigManager.isItemSlotReplaceEnabled()) {
-			return true
-		}
-
-		if (!ConfigManager.isAutoSelectItemSlotEnabled()) {
-			return true
-		}
-
-		val selectedStack = player.mainHandItem
-		val targetStack = player.inventory.getItem(targetSlotIndex)
-		return selectedStack === targetStack
-	}
-
-	private fun doesTargetContainTotem(player: Player, targetSlotIndex: Int): Boolean {
-		return getTargetStack(player, targetSlotIndex).`is`(Items.TOTEM_OF_UNDYING)
-	}
-
-	private fun getTargetStack(player: Player, targetSlotIndex: Int) =
-		if (targetSlotIndex == 45) player.offhandItem else player.inventory.getItem(targetSlotIndex)
-
-	private fun targetSlotLabel(targetSlotIndex: Int): String {
-		return if (targetSlotIndex == 45) "offhand" else "hotbar slot ${targetSlotIndex + 1}"
-	}
-
 	private fun suppressHeldInputs(client: Minecraft) {
 		KeyMapping.releaseAll()
 		client.options.keyMappings.forEach { it.setDown(false) }
 	}
 
-	private fun abortSequence(client: Minecraft, message: String) {
-		val player = client.player
-		if (player != null) {
-			normalizeCursor(client, player)
-			schedulePostAttemptWatch(sequenceTargetSlotIndex)
+	private fun currentSyncId(player: Player): Int {
+		return player.inventoryMenu.containerId
+	}
+
+	private fun scheduleNextTick(reason: String, player: Player) {
+		deferUntilTick = macroTick + 1
+		logger.warn("Deferring swap to next tick=$deferUntilTick (currentTick=$macroTick, syncId=${currentSyncId(player)}): $reason")
+	}
+
+	private fun clearCursorSafely(client: Minecraft, player: Player): Boolean {
+		if (player.inventoryMenu.carried.isEmpty) {
+			return true
 		}
 
+		val syncId = currentSyncId(player)
+		val emptySlot = findEmptyInventorySlot(player)
+		if (emptySlot != -1) {
+			performClick(client, emptySlot, syncId, "cursor-stash")
+		}
+
+		if (!player.inventoryMenu.carried.isEmpty) {
+			// Drop outside the screen as last resort to avoid a stuck ghost cursor state.
+			performClick(client, -999, syncId, "cursor-drop")
+		}
+
+		return player.inventoryMenu.carried.isEmpty
+	}
+
+	private fun ensureReadyBeforeSwap(client: Minecraft, player: Player, expectTotemOnCursor: Boolean): Boolean {
+		val carried = player.inventoryMenu.carried
+		if (expectTotemOnCursor) {
+			if (carried.isEmpty || !carried.`is`(Items.TOTEM_OF_UNDYING)) {
+				return false
+			}
+			return true
+		}
+
+		if (carried.isEmpty) {
+			return true
+		}
+
+		logger.warn("Unexpected cursor stack before swap action at tick $macroTick; attempting cleanup")
+		return clearCursorSafely(client, player)
+	}
+
+	private fun processVerifyQueue(player: Player) {
+		val task = verifyTask ?: return
+		if (macroTick < task.checkAtTick) {
+			return
+		}
+
+		val syncId = currentSyncId(player)
+		val offhandHasTotem = player.offhandItem.`is`(Items.TOTEM_OF_UNDYING)
+		if (offhandHasTotem) {
+			logger.info("Verify success at tick $macroTick (syncId=$syncId)")
+			verifyTask = null
+			return
+		}
+
+		if (task.retriesLeft <= 0) {
+			logger.error("Verify failed after retries at tick $macroTick (syncId=$syncId)")
+			verifyTask = null
+			return
+		}
+
+		task.retriesLeft -= 1
+		task.checkAtTick = macroTick + VERIFY_DELAY_TICKS
+		logger.warn("Verify miss at tick $macroTick (syncId=$syncId), retrying swap. retriesLeft=${task.retriesLeft}")
+
+		if (currentState == State.IDLE) {
+			currentState = State.INVENTORY_OPENING
+			tickCounter = 0
+			totemSlotIndex = -1
+		}
+	}
+
+	private fun findEmptyInventorySlot(player: Player): Int {
+		for (i in 9..35) {
+			if (player.inventory.getItem(i).isEmpty) {
+				return i
+			}
+		}
+		for (i in 0..8) {
+			if (player.inventory.getItem(i).isEmpty) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	private fun abortSequence(client: Minecraft, message: String) {
+		verifyTask = null
 		client.setScreen(null)
 		currentState = State.IDLE
 		tickCounter = 0
 		totemSlotIndex = -1
-		pendingStashSlotIndex = -1
-		verifyRetries = 0
-		interruptionRecoveryCount = 0
 		logger.warn(message)
 	}
-
-	private fun normalizeCursor(client: Minecraft, player: Player) {
-		val carried = player.inventoryMenu.carried
-		if (carried.isEmpty) {
-			return
-		}
-
-		val stashSlot = findStashSlot(player, sequenceTargetSlotIndex)
-		if (stashSlot != -1) {
-			performClick(client, stashSlot)
-		}
-	}
-
-	private fun findStashSlot(player: Player, excludedSlotIndex: Int): Int {
-		for (i in 9..35) {
-			if (i != excludedSlotIndex && player.inventory.getItem(i).isEmpty) {
-				return i
-			}
-		}
-
-		for (i in 0..8) {
-			if (i != excludedSlotIndex && player.inventory.getItem(i).isEmpty) {
-				return i
-			}
-		}
-
-		return -1
-	}
-
-	private fun debugLog(message: String) {
-		if (ConfigManager.isDebugModeEnabled()) {
-			logger.info("[debug] $message")
-		}
-	}
 }
+
