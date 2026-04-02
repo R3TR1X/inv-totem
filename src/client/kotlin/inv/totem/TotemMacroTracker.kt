@@ -341,7 +341,9 @@ object TotemMacroTracker {
 			return true
 		}
 
-		return player.inventory.selected == targetSlotIndex
+		val selectedStack = player.mainHandItem
+		val targetStack = player.inventory.getItem(targetSlotIndex)
+		return selectedStack === targetStack
 	}
 
 	private fun doesTargetContainTotem(player: Player, targetSlotIndex: Int): Boolean {
