@@ -19,6 +19,7 @@ Manages JSON-based configuration stored at `~/.minecraft/config/inv-totem-config
 - `instantClickTotem` (bool, default: false): Uses a fixed fast path with safety guards for fast refill.
 - `itemSlotReplace` (bool, default: false): Refill to a selected hotbar slot instead of offhand.
 - `itemSlotReplaceHotbarSlot` (int, default: 1, range: 1-9): Hotbar slot used when `itemSlotReplace` is enabled.
+- `autoSelectItemSlot` (bool, default: false): When enabled, slot mode only triggers if the selected hotbar slot matches `itemSlotReplaceHotbarSlot`.
 - `enabled` (bool, default: true): Toggle the feature on/off.
 - `debugMode` (bool, default: false): Enables verbose state-machine logs for troubleshooting.
 
@@ -29,6 +30,7 @@ Manages JSON-based configuration stored at `~/.minecraft/config/inv-totem-config
   "instantClickTotem": false,
   "itemSlotReplace": false,
   "itemSlotReplaceHotbarSlot": 1,
+  "autoSelectItemSlot": false,
   "enabled": true,
   "debugMode": false
 }
@@ -46,14 +48,18 @@ The core state machine that manages the automated totem replacement sequence. Us
 6. **FIRST_CLICK** → Clicks the totem slot to pick it up
 7. **CLICK_COOLDOWN** → Brief 1-tick pause between clicks
 8. **SECOND_CLICK** → Clicks configured target slot (offhand or selected hotbar slot)
-9. **CLOSING_INVENTORY** → Closes inventory screen and returns to idle
+9. **POST_TARGET_SYNC** → Waits 1-2 ticks for server sync to reduce cursor ghosting
+10. **VERIFY_OFFHAND** → Verifies target slot state and retries if interrupted
+11. **CLOSING_INVENTORY** → Closes inventory screen and returns to idle
 
 **Key Features:**
 - No `Thread.sleep()`; fully tick-based using Minecraft client tick events
 - Totem pop detection via current target item state tracking
 - Legitimate screen interaction using an inventory screen
-- Server-friendly slot clicking via `InteractionManager.clickSlot()`
+- Server-friendly slot clicking via inventory packet path (`handleInventoryMouseClick`)
 - Configurable timing for different server behavior
+- Interruption recovery for pickup races and cursor desync
+- Input suppression during swap to prevent manual click collision
 
 #### 3. `InvtotemClient.kt`
 Client-side entry point. Initializes and registers event listeners:
@@ -66,7 +72,7 @@ Server-side entry point (required for Fabric mod structure, though this is a cli
 ## Technical Details
 
 ### Supported Version
-- Current release: `v1.0.3`
+- Current version: `v1.0.4`
 
 ### Configuration File Location
 ```
@@ -115,6 +121,7 @@ Edit `~/.minecraft/config/inv-totem-config.json`:
   "instantClickTotem": false,
   "itemSlotReplace": false,
   "itemSlotReplaceHotbarSlot": 1,
+  "autoSelectItemSlot": false,
   "enabled": true,
   "debugMode": false
 }
@@ -124,7 +131,16 @@ Edit `~/.minecraft/config/inv-totem-config.json`:
 - `instantClickTotem: true`: Uses a 1-tick fast path before first click
 - `itemSlotReplace: true`: Targets the selected hotbar slot instead of offhand
 - `itemSlotReplaceHotbarSlot: 1-9`: Chooses which hotbar slot to keep filled with totems
+- `autoSelectItemSlot: true`: Only runs slot mode when your selected hotbar slot matches the configured slot
 - `debugMode: true`: Adds detailed `[debug]` logs to help diagnose edge cases
+
+### 4. Config Menu Tabs
+
+The in-game config screen now uses two tabs:
+- Main Settings: delay, instant mode, debug mode
+- Slot Mode: item-slot replace toggle, target slot selector, auto-select condition
+
+Use the `Slot Mode` button under `Done` to switch tabs.
 
 ### 4. Use
 Simply play with a Totem of Undying in your inventory. When the totem pops, the mod automatically:
