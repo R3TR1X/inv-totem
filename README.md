@@ -1,6 +1,6 @@
 # Inv-Totem: Delayed Auto-Totem Refill Mod
 
-A production-ready Minecraft Fabric client-side mod (1.21.10, Kotlin) that automatically refills a Totem of Undying into your offhand after it pops, using tick-based delays.
+A production-ready Minecraft Fabric client-side mod (1.21.10, Kotlin) that automatically refills a Totem of Undying after it pops, using tick-based delays.
 
 ## Mod Pages
 Modrinth: https://modrinth.com/mod/inv-totem
@@ -19,6 +19,8 @@ Manages JSON-based configuration stored at `~/.minecraft/config/inv-totem-config
 **Configuration Options:**
 - `swapDelayMs` (int, default: 100ms, range: 0-500ms): Delay before clicking the totem slot. Adjust to balance anti-cheat evasion vs. responsiveness.
 - `instantClickTotem` (bool, default: false): Uses a fixed fast path with safety guards for fast refill.
+- `itemSlotReplace` (bool, default: false): Refill to a selected hotbar slot instead of offhand.
+- `itemSlotReplaceHotbarSlot` (int, default: 1, range: 1-9): Hotbar slot used when `itemSlotReplace` is enabled.
 - `enabled` (bool, default: true): Toggle the feature on/off.
 - `debugMode` (bool, default: false): Enables verbose state-machine logs for troubleshooting.
 
@@ -27,6 +29,8 @@ Manages JSON-based configuration stored at `~/.minecraft/config/inv-totem-config
 {
   "swapDelayMs": 100,
   "instantClickTotem": false,
+  "itemSlotReplace": false,
+  "itemSlotReplaceHotbarSlot": 1,
   "enabled": true,
   "debugMode": false
 }
@@ -36,19 +40,19 @@ Manages JSON-based configuration stored at `~/.minecraft/config/inv-totem-config
 The core state machine that manages the automated totem replacement sequence. Uses a tick-based scheduler hooked into `ClientTickEvents.END_CLIENT_TICK` to avoid blocking the main thread.
 
 **State Machine Flow:**
-1. **IDLE** → Waiting for totem pop detection
+1. **IDLE** → Waiting for target-slot totem pop detection
 2. **INVENTORY_OPENING** → Opens the inventory screen
 3. **SAFETY_BUFFER** → Waits ~75ms (2 ticks) for server sync
 4. **SCANNING_FOR_TOTEM** → Scans main inventory (slots 0-35) for Totem of Undying
 5. **WAITING_FOR_SWAP_DELAY** → Waits configurable delay (100ms default)
 6. **FIRST_CLICK** → Clicks the totem slot to pick it up
 7. **CLICK_COOLDOWN** → Brief 1-tick pause between clicks
-8. **SECOND_CLICK** → Clicks offhand slot (slot 45) to place totem
+8. **SECOND_CLICK** → Clicks configured target slot (offhand or selected hotbar slot)
 9. **CLOSING_INVENTORY** → Closes inventory screen and returns to idle
 
 **Key Features:**
 - ✅ No `Thread.sleep()` — fully tick-based using Minecraft's client tick events
-- ✅ Totem pop detection via offhand item state tracking
+- ✅ Totem pop detection via current target item state tracking
 - ✅ Legitimate screen interaction (opens InventoryScreen)
 - ✅ Server-friendly slot clicking via `InteractionManager.clickSlot()`
 - ✅ Configurable timing to evade anti-cheat patterns
@@ -92,7 +96,7 @@ Auto-created on first launch with default values.
 2. **Configurable Delays**: Custom `swapDelayMs` allows tuning for specific servers' detection patterns
 3. **Server Sync Window**: 75ms safety buffer after inventory open ensures server recognizes screen state
 4. **Legitimate Slot Clicks**: Uses standard `InteractionManager` API (identical to player clicks)
-5. **Stateful Timing**: Avoids burst clicks—tick-based delays make pattern recognition difficult
+5. **Stateful Timing**: Avoids burst clicks - tick-based delays make pattern recognition difficult
 
 ## Usage
 
@@ -108,6 +112,8 @@ Edit `~/.minecraft/config/inv-totem-config.json`:
 {
   "swapDelayMs": 75,
   "instantClickTotem": false,
+  "itemSlotReplace": false,
+  "itemSlotReplaceHotbarSlot": 1,
   "enabled": true,
   "debugMode": false
 }
@@ -115,13 +121,15 @@ Edit `~/.minecraft/config/inv-totem-config.json`:
 - Lower values (25-50ms): Faster auto-swap, higher detection risk
 - Higher values (150-250ms): Slower auto-swap, safer on strict servers
 - `instantClickTotem: true`: Uses a 1-tick fast path before first click
+- `itemSlotReplace: true`: Targets the selected hotbar slot instead of offhand
+- `itemSlotReplaceHotbarSlot: 1-9`: Chooses which hotbar slot to keep filled with totems
 - `debugMode: true`: Adds detailed `[debug]` logs to help diagnose edge cases
 
 ### 4. Use
 Simply play with a Totem of Undying in your inventory. When the totem pops, the mod automatically:
 1. Opens inventory
 2. Finds and clicks the new totem
-3. Swaps it to your offhand
+3. Swaps it to your configured target (offhand or selected hotbar slot)
 4. Closes inventory
 
 All within ~300-500ms total (configurable).

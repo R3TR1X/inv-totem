@@ -31,6 +31,18 @@ object ConfigManager {
 		 * When enabled, clicks the replacement totem immediately after it is found.
 		 */
 		var instantClickTotem: Boolean = false,
+
+		/**
+		 * When enabled, places replacement totems into a selected hotbar slot
+		 * instead of the offhand slot.
+		 */
+		var itemSlotReplace: Boolean = false,
+
+		/**
+		 * 1-based hotbar slot index used when item slot replace mode is enabled.
+		 * Allowed range: 1-9
+		 */
+		var itemSlotReplaceHotbarSlot: Int = 1,
 		
 		/**
 		 * Enable/disable the auto-totem feature.
@@ -56,8 +68,9 @@ object ConfigManager {
 				val json = configFile.readText()
 				config = gson.fromJson(json, TotemConfig::class.java) ?: TotemConfig()
 				config.swapDelayMs = config.swapDelayMs.coerceIn(0, 500)
+				config.itemSlotReplaceHotbarSlot = config.itemSlotReplaceHotbarSlot.coerceIn(1, 9)
 				logger.info(
-					"Loaded config: swapDelayMs=${config.swapDelayMs}, instantClickTotem=${config.instantClickTotem}, enabled=${config.enabled}, debugMode=${config.debugMode}"
+					"Loaded config: swapDelayMs=${config.swapDelayMs}, instantClickTotem=${config.instantClickTotem}, itemSlotReplace=${config.itemSlotReplace}, itemSlotReplaceHotbarSlot=${config.itemSlotReplaceHotbarSlot}, enabled=${config.enabled}, debugMode=${config.debugMode}"
 				)
 			}
 		} catch (e: Exception) {
@@ -107,6 +120,32 @@ object ConfigManager {
 	 */
 	fun setInstantClickTotemEnabled(enabled: Boolean) {
 		config.instantClickTotem = enabled
+		saveConfig()
+	}
+
+	/**
+	 * Check if item slot replace mode is enabled.
+	 */
+	fun isItemSlotReplaceEnabled(): Boolean = config.itemSlotReplace
+
+	/**
+	 * Enable or disable item slot replace mode.
+	 */
+	fun setItemSlotReplaceEnabled(enabled: Boolean) {
+		config.itemSlotReplace = enabled
+		saveConfig()
+	}
+
+	/**
+	 * Get selected target hotbar slot for item slot replace mode (1-9).
+	 */
+	fun getItemSlotReplaceHotbarSlot(): Int = config.itemSlotReplaceHotbarSlot
+
+	/**
+	 * Set selected target hotbar slot for item slot replace mode (1-9).
+	 */
+	fun setItemSlotReplaceHotbarSlot(slot: Int) {
+		config.itemSlotReplaceHotbarSlot = slot.coerceIn(1, 9)
 		saveConfig()
 	}
 	

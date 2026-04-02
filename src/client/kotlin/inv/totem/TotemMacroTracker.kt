@@ -34,7 +34,8 @@ object TotemMacroTracker {
 	private var currentState: State = State.IDLE
 	private var tickCounter: Int = 0
 	private var totemSlotIndex: Int = -1
-	private var lastOffhandHadTotem: Boolean? = null
+	private var lastTargetHadTotem: Boolean? = null
+	private var lastItemSlotReplaceMode: Boolean? = null
 	private var lastStateForDebug: State = State.IDLE
 	
 	init {
@@ -56,13 +57,20 @@ object TotemMacroTracker {
 		
 		val client = Minecraft.getInstance()
 		val player = client.player ?: return
+		val itemSlotReplaceMode = ConfigManager.isItemSlotReplaceEnabled()
+		val targetSlotIndex = getTargetSlotIndex()
+		val currentTargetHasTotem = doesTargetContainTotem(player, targetSlotIndex)
+
+		// If target mode changed at runtime, resync detection baseline to avoid false pop events.
+		if (lastItemSlotReplaceMode != itemSlotReplaceMode) {
+			lastTargetHadTotem = currentTargetHasTotem
+			lastItemSlotReplaceMode = itemSlotReplaceMode
+		}
 		
-		// Detect when the offhand transitions away from a totem.
-		val currentOffhandHasTotem = player.offhandItem.`is`(Items.TOTEM_OF_UNDYING)
-		
-		// Detect totem pop: offhand was totem, now it's not
-		if (lastOffhandHadTotem == true && !currentOffhandHasTotem) {
-			logger.info("Totem pop detected! Offhand no longer contains a totem.")
+		// Detect totem use: target slot/offhand was totem and now isn't.
+		if (lastTargetHadTotem == true && !currentTargetHasTotem) {
+			val targetName = targetSlotLabel(targetSlotIndex)
+			logger.info("Totem pop detected! $targetName no longer contains a totem.")
 			if (currentState == State.IDLE) {
 				currentState = State.INVENTORY_OPENING
 				tickCounter = 0
@@ -70,7 +78,7 @@ object TotemMacroTracker {
 			}
 		}
 		
-		lastOffhandHadTotem = currentOffhandHasTotem
+		lastTargetHadTotem = currentTargetHasTotem
 
 		if (currentState != State.IDLE) {
 			suppressHeldInputs(client)
@@ -183,39 +191,39 @@ object TotemMacroTracker {
 			}
 			
 			State.SECOND_CLICK -> {
-				// Click the offhand slot (slot 45)
+				// Click the configured target slot (offhand or selected hotbar slot)
 				if (player.inventoryMenu.carried.isEmpty) {
 					if (tickCounter >= MAX_CURSOR_WAIT_TICKS) {
-						abortSequence(client, "Expected to be carrying the totem before offhand click, but cursor stayed empty")
+						abortSequence(client, "Expected to be carrying the totem before target slot click, but cursor stayed empty")
 						return
 					}
 
 					tickCounter++
-					debugLog("Waiting for totem to appear on cursor before offhand click")
+					debugLog("Waiting for totem to appear on cursor before target slot click")
 					return
 				}
 
-				performClick(client, 45)
+				performClick(client, targetSlotIndex)
 				currentState = State.VERIFY_OFFHAND
 				tickCounter = 0
-				debugLog("Clicked offhand slot 45")
+				debugLog("Clicked ${targetSlotLabel(targetSlotIndex)}")
 			}
 
 			State.VERIFY_OFFHAND -> {
-				val offhandHasTotem = player.offhandItem.`is`(Items.TOTEM_OF_UNDYING)
+				val targetHasTotem = doesTargetContainTotem(player, targetSlotIndex)
 				val carryingItem = !player.inventoryMenu.carried.isEmpty
 
-				if (offhandHasTotem && !carryingItem) {
+				if (targetHasTotem && !carryingItem) {
 					currentState = State.CLOSING_INVENTORY
 					tickCounter = 0
 				} else {
 					if (carryingItem) {
-						performClick(client, 45)
-						logger.warn("Offhand placement not confirmed yet, retrying offhand click")
+						performClick(client, targetSlotIndex)
+						logger.warn("Totem placement not confirmed yet for ${targetSlotLabel(targetSlotIndex)}, retrying click")
 					}
 
 					if (tickCounter >= 4) {
-						abortSequence(client, "Failed to verify totem in offhand after swap, aborting")
+						abortSequence(client, "Failed to verify totem in ${targetSlotLabel(targetSlotIndex)} after swap, aborting")
 						return
 					}
 
@@ -281,6 +289,30 @@ object TotemMacroTracker {
 		return when (slotIndex) {
 			in 0..8 -> slotIndex + 36
 			else -> slotIndex
+		}
+	}
+
+	private fun getTargetSlotIndex(): Int {
+		return if (ConfigManager.isItemSlotReplaceEnabled()) {
+			ConfigManager.getItemSlotReplaceHotbarSlot() - 1
+		} else {
+			45
+		}
+	}
+
+	private fun doesTargetContainTotem(player: Player, targetSlotIndex: Int): Boolean {
+		return if (targetSlotIndex == 45) {
+			player.offhandItem.`is`(Items.TOTEM_OF_UNDYING)
+		} else {
+			player.inventory.getItem(targetSlotIndex).`is`(Items.TOTEM_OF_UNDYING)
+		}
+	}
+
+	private fun targetSlotLabel(targetSlotIndex: Int): String {
+		return if (targetSlotIndex == 45) {
+			"offhand"
+		} else {
+			"hotbar slot ${targetSlotIndex + 1}"
 		}
 	}
 

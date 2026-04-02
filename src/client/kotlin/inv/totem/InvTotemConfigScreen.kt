@@ -17,6 +17,8 @@ private fun delayMsToSliderValue(delayMs: Int): Double {
 class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.literal("Inv-Totem Config")) {
 	private var selectedDelayMs = ConfigManager.getSwapDelayMs()
 	private var instantClickTotemEnabled = ConfigManager.isInstantClickTotemEnabled()
+	private var itemSlotReplaceEnabled = ConfigManager.isItemSlotReplaceEnabled()
+	private var itemSlotReplaceHotbarSlot = ConfigManager.getItemSlotReplaceHotbarSlot()
 	private var debugModeEnabled = ConfigManager.isDebugModeEnabled()
 
 	override fun init() {
@@ -24,8 +26,10 @@ class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.
 
 		val sliderWidth = 220
 		val sliderX = (width - sliderWidth) / 2
-		val toggleY = height / 2 - 24
-		val debugToggleY = toggleY + 24
+		val toggleY = height / 2 - 48
+		val slotReplaceToggleY = toggleY + 24
+		val slotSelectY = slotReplaceToggleY + 24
+		val debugToggleY = slotSelectY + 24
 		val sliderY = debugToggleY + 38
 		val titleText = Component.literal("INV-TOTEM CONFIG")
 		val titleWidget = StringWidget(titleText, font).setColor(0xFFFFFF)
@@ -39,6 +43,20 @@ class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.
 				instantClickTotemEnabled = !instantClickTotemEnabled
 				button.setMessage(instantClickButtonLabel())
 			}.bounds(sliderX, toggleY, sliderWidth, 20).build()
+		)
+
+		addRenderableWidget(
+			Button.builder(itemSlotReplaceButtonLabel()) { button ->
+				itemSlotReplaceEnabled = !itemSlotReplaceEnabled
+				button.setMessage(itemSlotReplaceButtonLabel())
+			}.bounds(sliderX, slotReplaceToggleY, sliderWidth, 20).build()
+		)
+
+		addRenderableWidget(
+			Button.builder(itemSlotSelectButtonLabel()) { button ->
+				itemSlotReplaceHotbarSlot = if (itemSlotReplaceHotbarSlot >= 9) 1 else itemSlotReplaceHotbarSlot + 1
+				button.setMessage(itemSlotSelectButtonLabel())
+			}.bounds(sliderX, slotSelectY, sliderWidth, 20).build()
 		)
 
 		addRenderableWidget(
@@ -73,6 +91,8 @@ class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.
 	private fun saveAndClose() {
 		ConfigManager.setSwapDelayMs(selectedDelayMs)
 		ConfigManager.setInstantClickTotemEnabled(instantClickTotemEnabled)
+		ConfigManager.setItemSlotReplaceEnabled(itemSlotReplaceEnabled)
+		ConfigManager.setItemSlotReplaceHotbarSlot(itemSlotReplaceHotbarSlot)
 		ConfigManager.setDebugModeEnabled(debugModeEnabled)
 		minecraft?.setScreen(parentScreen)
 	}
@@ -85,6 +105,15 @@ class InvTotemConfigScreen(private val parentScreen: Screen) : Screen(Component.
 	private fun debugModeButtonLabel(): Component {
 		val stateText = if (debugModeEnabled) "Enabled" else "Disabled"
 		return Component.literal("Debug Mode: $stateText")
+	}
+
+	private fun itemSlotReplaceButtonLabel(): Component {
+		val stateText = if (itemSlotReplaceEnabled) "Enabled" else "Disabled"
+		return Component.literal("Item Slot Replace: $stateText")
+	}
+
+	private fun itemSlotSelectButtonLabel(): Component {
+		return Component.literal("Replace Slot: $itemSlotReplaceHotbarSlot")
 	}
 }
 
