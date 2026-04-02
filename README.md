@@ -3,17 +3,15 @@
 A production-ready Minecraft Fabric client-side mod (1.21.10, Kotlin) that automatically refills a Totem of Undying after it pops, using tick-based delays.
 
 ## Mod Pages
-Modrinth: https://modrinth.com/mod/inv-totem
-
-curseforge: https://legacy.curseforge.com/minecraft/mc-mods/inv-totem
-
-Issues: https://github.com/R3TR1X/inv-totem/issues
+- Modrinth: https://modrinth.com/mod/inv-totem
+- CurseForge: https://legacy.curseforge.com/minecraft/mc-mods/inv-totem
+- Issues: https://github.com/R3TR1X/inv-totem/issues
 
 ## Architecture Overview
 
 ### Core Components
 
-#### 1. **ConfigManager.kt**
+#### 1. `ConfigManager.kt`
 Manages JSON-based configuration stored at `~/.minecraft/config/inv-totem-config.json`.
 
 **Configuration Options:**
@@ -36,7 +34,7 @@ Manages JSON-based configuration stored at `~/.minecraft/config/inv-totem-config
 }
 ```
 
-#### 2. **TotemMacroTracker.kt**
+#### 2. `TotemMacroTracker.kt`
 The core state machine that manages the automated totem replacement sequence. Uses a tick-based scheduler hooked into `ClientTickEvents.END_CLIENT_TICK` to avoid blocking the main thread.
 
 **State Machine Flow:**
@@ -51,21 +49,24 @@ The core state machine that manages the automated totem replacement sequence. Us
 9. **CLOSING_INVENTORY** → Closes inventory screen and returns to idle
 
 **Key Features:**
-- ✅ No `Thread.sleep()` — fully tick-based using Minecraft's client tick events
-- ✅ Totem pop detection via current target item state tracking
-- ✅ Legitimate screen interaction (opens InventoryScreen)
-- ✅ Server-friendly slot clicking via `InteractionManager.clickSlot()`
-- ✅ Configurable timing to evade anti-cheat patterns
+- No `Thread.sleep()`; fully tick-based using Minecraft client tick events
+- Totem pop detection via current target item state tracking
+- Legitimate screen interaction using an inventory screen
+- Server-friendly slot clicking via `InteractionManager.clickSlot()`
+- Configurable timing for different server behavior
 
-#### 3. **InvtotemClient.kt**
+#### 3. `InvtotemClient.kt`
 Client-side entry point. Initializes and registers event listeners:
 - Loads configuration on startup
 - Registers `TotemMacroTracker.onClientTick()` to `ClientTickEvents.END_CLIENT_TICK`
 
-#### 4. **Invtotem.kt**
+#### 4. `Invtotem.kt`
 Server-side entry point (required for Fabric mod structure, though this is a client-only mod).
 
 ## Technical Details
+
+### Supported Version
+- Current release: `v1.0.3`
 
 ### Configuration File Location
 ```
@@ -148,14 +149,14 @@ Output JAR: `build/libs/inv-totem-*-client.jar`
 - Fabric API
 - Fabric Language Kotlin
 
-## Code Quality & Safety
+## Code Quality and Safety
 
-- ✅ Zero blocking operations (no `Thread.sleep()`)
-- ✅ Null-safe operations with Kotlin's null-coalescing
-- ✅ Comprehensive logging for debugging
-- ✅ Clean state machine pattern for maintainability
-- ✅ Config validation (delay clamped to 0-1000ms range)
-- ✅ Graceful error recovery (aborts and returns to idle on failures)
+- Zero blocking operations (no `Thread.sleep()`)
+- Null-safe operations in Kotlin
+- Structured logging for debugging
+- Clean state-machine implementation
+- Config validation and clamping
+- Graceful error recovery (aborts and returns to idle on failures)
 
 ## Logging
 
@@ -181,7 +182,7 @@ Key log messages:
 - Check `enabled: true` in config
 - Review logs for "Totem not found" warning
 
-**anti-cheat-trigguring?**
+**Anti-cheat triggering?**
 - Increase `swapDelayMs` (try 150-200ms)
 - Ensure inventory opens/closes visibly (not teleporting)
 - Verify slot clicks are registered on server side
