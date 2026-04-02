@@ -248,8 +248,8 @@ object TotemMacroTracker {
 	 */
 	private fun performClick(client: Minecraft, slotIndex: Int, expectedSyncId: Int, actionName: String): Boolean {
 		try {
-			val player = client.player ?: return
-			val gameMode = client.gameMode ?: return
+			val player = client.player ?: return false
+			val gameMode = client.gameMode ?: return false
 			val currentSyncId = currentSyncId(player)
 
 			if (currentSyncId != expectedSyncId) {
