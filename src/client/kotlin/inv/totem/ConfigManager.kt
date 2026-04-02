@@ -43,6 +43,12 @@ object ConfigManager {
 		 * Allowed range: 1-9
 		 */
 		var itemSlotReplaceHotbarSlot: Int = 1,
+
+		/**
+		 * When enabled, item slot replace mode only runs if the configured hotbar slot
+		 * is currently selected by the player.
+		 */
+		var autoSelectItemSlot: Boolean = false,
 		
 		/**
 		 * Enable/disable the auto-totem feature.
@@ -70,7 +76,7 @@ object ConfigManager {
 				config.swapDelayMs = config.swapDelayMs.coerceIn(0, 500)
 				config.itemSlotReplaceHotbarSlot = config.itemSlotReplaceHotbarSlot.coerceIn(1, 9)
 				logger.info(
-					"Loaded config: swapDelayMs=${config.swapDelayMs}, instantClickTotem=${config.instantClickTotem}, itemSlotReplace=${config.itemSlotReplace}, itemSlotReplaceHotbarSlot=${config.itemSlotReplaceHotbarSlot}, enabled=${config.enabled}, debugMode=${config.debugMode}"
+					"Loaded config: swapDelayMs=${config.swapDelayMs}, instantClickTotem=${config.instantClickTotem}, itemSlotReplace=${config.itemSlotReplace}, itemSlotReplaceHotbarSlot=${config.itemSlotReplaceHotbarSlot}, autoSelectItemSlot=${config.autoSelectItemSlot}, enabled=${config.enabled}, debugMode=${config.debugMode}"
 				)
 			}
 		} catch (e: Exception) {
@@ -146,6 +152,19 @@ object ConfigManager {
 	 */
 	fun setItemSlotReplaceHotbarSlot(slot: Int) {
 		config.itemSlotReplaceHotbarSlot = slot.coerceIn(1, 9)
+		saveConfig()
+	}
+
+	/**
+	 * Check if item slot mode should only run when selected slot matches target slot.
+	 */
+	fun isAutoSelectItemSlotEnabled(): Boolean = config.autoSelectItemSlot
+
+	/**
+	 * Enable or disable selected-slot gating for item slot mode.
+	 */
+	fun setAutoSelectItemSlotEnabled(enabled: Boolean) {
+		config.autoSelectItemSlot = enabled
 		saveConfig()
 	}
 	
