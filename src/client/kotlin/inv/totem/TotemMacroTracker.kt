@@ -10,13 +10,19 @@ import org.slf4j.LoggerFactory
 /**
  * Handles the totem auto-refill macro logic.
  * Tracks when a totem is used and automatically replaces it from inventory with tick-based delays.
+ *
+ * Bug-fix changelog (v1.0.6):
+ *   FIX-1  Kit loading cursor lock — require recent damage to trigger (hurtTime / low HP check)
+ *   FIX-2  Crystal combo instant death — pendingRepop flag re-triggers immediately after sequence
+ *   FIX-3  Slot replace mode — target slot is now computed from config, verify checks correct slot
  */
 object TotemMacroTracker {
 	private val logger = LoggerFactory.getLogger("inv-totem-tracker")
 	private const val MIN_ACTION_GAP_TICKS = 2L
 	private const val VERIFY_DELAY_TICKS = 3L
 	private const val MAX_VERIFY_RETRIES = 3
-	
+	private const val STATE_TIMEOUT_TICKS = 40L   // FIX-1: abort if stuck > 2 seconds
+
 	/**
 	 * State machine for the totem replacement sequence.
 	 */
@@ -28,10 +34,10 @@ object TotemMacroTracker {
 		WAITING_FOR_SWAP_DELAY,     // Waiting for configured delay before clicking
 		FIRST_CLICK,                // Clicking the totem in inventory
 		CLICK_COOLDOWN,             // Brief delay between first and second click
-		SECOND_CLICK,               // Clicking the offhand slot
+		SECOND_CLICK,               // Clicking the target slot (offhand or hotbar)
 		CLOSING_INVENTORY,          // Closing the inventory screen
 	}
-	
+
 	private var currentState: State = State.IDLE
 	private var tickCounter: Int = 0
 	private var totemSlotIndex: Int = -1
@@ -39,6 +45,12 @@ object TotemMacroTracker {
 	private var macroTick: Long = 0L
 	private var lastActionTick: Long = -9999L
 	private var deferUntilTick: Long = 0L
+
+	// FIX-1: Track state-entry tick for timeout detection
+	private var stateEntryTick: Long = 0L
+
+	// FIX-2: If a totem pop fires while the state machine is already active, queue a re-trigger
+	private var pendingRepop: Boolean = false
 
 	private data class VerifyTask(
 		var targetSlot: Int,
@@ -76,11 +88,31 @@ object TotemMacroTracker {
 		
 		// Detect totem pop: offhand was totem, now it's not
 		if (lastOffhandHadTotem == true && !currentOffhandHasTotem) {
-			logger.info("Totem pop detected! Offhand no longer contains a totem.")
+			// ────────────────────────────────────────────────────────────────
+			// FIX-1: Only trigger if the player actually took damage.
+			//   hurtTime > 0  → player was hit this/last tick (red-flash timer)
+			//   health <= 4   → post-totem-pop HP (totem sets you to 1 HP + regen)
+			//   Either condition confirms a real totem pop, NOT a kit load.
+			// ────────────────────────────────────────────────────────────────
+			val isDamaged = player.hurtTime > 0 || player.health <= 4.0f
+
 			if (currentState == State.IDLE) {
-				currentState = State.INVENTORY_OPENING
-				tickCounter = 0
-				totemSlotIndex = -1
+				if (isDamaged) {
+					logger.info("Totem pop detected (hurtTime=${player.hurtTime}, hp=${player.health}). Starting replacement.")
+					currentState = State.INVENTORY_OPENING
+					tickCounter = 0
+					totemSlotIndex = -1
+					stateEntryTick = macroTick
+				} else {
+					logger.info("Offhand totem removed without damage (hurtTime=0, hp=${player.health}). Kit load? Skipping.")
+				}
+			} else if (isDamaged) {
+				// ────────────────────────────────────────────────────────────
+				// FIX-2: Crystal combo — a second pop happened while we're
+				//   still replacing the first one. Mark for immediate re-trigger.
+				// ────────────────────────────────────────────────────────────
+				pendingRepop = true
+				logger.warn("Re-pop during active sequence at tick $macroTick. Queued for retry after completion.")
 			}
 		}
 		
@@ -88,6 +120,13 @@ object TotemMacroTracker {
 
 		if (currentState != State.IDLE) {
 			suppressHeldInputs(client)
+
+			// FIX-1: Timeout — abort if stuck in any state for too long (e.g., screen failed to open)
+			if (macroTick - stateEntryTick > STATE_TIMEOUT_TICKS) {
+				clearCursorSafely(client, player)
+				abortSequence(client, "State machine timeout (${STATE_TIMEOUT_TICKS} ticks in $currentState). Force-aborting.")
+				return
+			}
 		}
 		
 		// State machine execution
@@ -97,6 +136,9 @@ object TotemMacroTracker {
 			}
 			
 			State.INVENTORY_OPENING -> {
+				// FIX-1: Clear any stuck cursor item before opening (prevents ghost items from kit loads)
+				clearCursorSafely(client, player)
+
 				// Open the inventory screen
 				client.setScreen(LockedInventoryScreen(player))
 				if (ConfigManager.isInstantClickTotemEnabled()) {
@@ -107,6 +149,7 @@ object TotemMacroTracker {
 					tickCounter = 0
 					logger.info("Opened inventory screen")
 				}
+				stateEntryTick = macroTick
 			}
 			
 			State.SAFETY_BUFFER -> {
@@ -194,27 +237,47 @@ object TotemMacroTracker {
 			}
 			
 			State.SECOND_CLICK -> {
-				// Click the offhand slot (slot 45)
+				// ────────────────────────────────────────────────────────────
+				// FIX-3: Determine target slot from config.
+				//   - Default: offhand (slot 45)
+				//   - Slot Replace mode: hotbar slot (0-8, mapped to 36-44 by toMenuSlotIndex)
+				// ────────────────────────────────────────────────────────────
+				val targetSlot: Int
+				if (ConfigManager.isItemSlotReplaceEnabled()) {
+					val hotbarIndex = ConfigManager.getItemSlotReplaceHotbarSlot() - 1  // 1-based → 0-based
+
+					// Auto-select gating: only replace if the player is holding the target hotbar slot
+					if (ConfigManager.isAutoSelectItemSlotEnabled() && player.inventory.getSelectedSlot() != hotbarIndex) {
+						abortSequence(client,
+							"Auto-select check failed: player holding slot ${player.inventory.getSelectedSlot()}, target is $hotbarIndex. Aborting.")
+						return
+					}
+					targetSlot = hotbarIndex  // toMenuSlotIndex will map 0-8 → 36-44
+					logger.info("Slot Replace mode: targeting hotbar slot ${hotbarIndex + 1} (menu index ${toMenuSlotIndex(hotbarIndex)})")
+				} else {
+					targetSlot = 45  // Offhand
+				}
+
 				if (!ensureReadyBeforeSwap(client, player, expectTotemOnCursor = true)) {
-					scheduleNextTick("cursor changed before offhand click", player)
+					scheduleNextTick("cursor changed before target click", player)
 					currentState = State.SCANNING_FOR_TOTEM
 					return
 				}
 
 				val syncId = currentSyncId(player)
-				if (!performClick(client, 45, syncId, "place-offhand")) {
+				if (!performClick(client, targetSlot, syncId, "place-target")) {
 					scheduleNextTick("second click throttled or sync mismatch", player)
 					return
 				}
 
 				verifyTask = VerifyTask(
-					targetSlot = 45,
+					targetSlot = targetSlot,
 					checkAtTick = macroTick + VERIFY_DELAY_TICKS,
 					retriesLeft = MAX_VERIFY_RETRIES,
 				)
-				logger.info("Scheduled post-swap verification at tick ${macroTick + VERIFY_DELAY_TICKS} (syncId=$syncId)")
+				logger.info("Scheduled post-swap verification at tick ${macroTick + VERIFY_DELAY_TICKS} (syncId=$syncId, target=$targetSlot)")
 				currentState = State.CLOSING_INVENTORY
-				logger.debug("Clicked offhand slot 45")
+				logger.debug("Clicked target slot $targetSlot")
 			}
 			
 			State.CLOSING_INVENTORY -> {
@@ -222,6 +285,20 @@ object TotemMacroTracker {
 				client.setScreen(null)
 				currentState = State.IDLE
 				logger.info("Inventory closed, totem replacement complete")
+
+				// ────────────────────────────────────────────────────────────
+				// FIX-2: Crystal combo re-trigger.
+				//   If another totem pop was detected while we were mid-sequence,
+				//   immediately restart the replacement instead of staying idle.
+				// ────────────────────────────────────────────────────────────
+				if (pendingRepop) {
+					pendingRepop = false
+					logger.info("Crystal combo: re-triggering macro for pending re-pop.")
+					currentState = State.INVENTORY_OPENING
+					tickCounter = 0
+					totemSlotIndex = -1
+					stateEntryTick = macroTick
+				}
 			}
 		}
 	}
@@ -248,8 +325,8 @@ object TotemMacroTracker {
 	 */
 	private fun performClick(client: Minecraft, slotIndex: Int, expectedSyncId: Int, actionName: String): Boolean {
 		try {
-			val player = client.player ?: return
-			val gameMode = client.gameMode ?: return
+			val player = client.player ?: return false
+			val gameMode = client.gameMode ?: return false
 			val currentSyncId = currentSyncId(player)
 
 			if (currentSyncId != expectedSyncId) {
@@ -338,6 +415,9 @@ object TotemMacroTracker {
 		return clearCursorSafely(client, player)
 	}
 
+	/**
+	 * FIX-3: Verify now checks the correct slot (offhand OR hotbar) depending on config.
+	 */
 	private fun processVerifyQueue(player: Player) {
 		val task = verifyTask ?: return
 		if (macroTick < task.checkAtTick) {
@@ -345,27 +425,37 @@ object TotemMacroTracker {
 		}
 
 		val syncId = currentSyncId(player)
-		val offhandHasTotem = player.offhandItem.`is`(Items.TOTEM_OF_UNDYING)
-		if (offhandHasTotem) {
-			logger.info("Verify success at tick $macroTick (syncId=$syncId)")
+
+		// Check the slot we actually placed the totem into
+		val slotHasTotem = if (task.targetSlot == 45) {
+			// Offhand mode
+			player.offhandItem.`is`(Items.TOTEM_OF_UNDYING)
+		} else {
+			// Slot Replace mode — targetSlot is 0-8 (inventory hotbar index)
+			player.inventory.getItem(task.targetSlot).`is`(Items.TOTEM_OF_UNDYING)
+		}
+
+		if (slotHasTotem) {
+			logger.info("Verify success at tick $macroTick (syncId=$syncId, slot=${task.targetSlot})")
 			verifyTask = null
 			return
 		}
 
 		if (task.retriesLeft <= 0) {
-			logger.error("Verify failed after retries at tick $macroTick (syncId=$syncId)")
+			logger.error("Verify failed after retries at tick $macroTick (syncId=$syncId, slot=${task.targetSlot})")
 			verifyTask = null
 			return
 		}
 
 		task.retriesLeft -= 1
 		task.checkAtTick = macroTick + VERIFY_DELAY_TICKS
-		logger.warn("Verify miss at tick $macroTick (syncId=$syncId), retrying swap. retriesLeft=${task.retriesLeft}")
+		logger.warn("Verify miss at tick $macroTick (syncId=$syncId, slot=${task.targetSlot}), retrying swap. retriesLeft=${task.retriesLeft}")
 
 		if (currentState == State.IDLE) {
 			currentState = State.INVENTORY_OPENING
 			tickCounter = 0
 			totemSlotIndex = -1
+			stateEntryTick = macroTick
 		}
 	}
 
@@ -384,6 +474,7 @@ object TotemMacroTracker {
 	}
 
 	private fun abortSequence(client: Minecraft, message: String) {
+		pendingRepop = false           // FIX-2: clear queued re-trigger on abort
 		verifyTask = null
 		client.setScreen(null)
 		currentState = State.IDLE
@@ -392,4 +483,3 @@ object TotemMacroTracker {
 		logger.warn(message)
 	}
 }
-

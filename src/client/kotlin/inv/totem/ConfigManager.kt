@@ -20,50 +20,21 @@ object ConfigManager {
 	private var config: TotemConfig = TotemConfig()
 	
 	data class TotemConfig(
-		/**
-		 * Delay in milliseconds before clicking the totem slot.
-		 * Adjust this value to balance between anti-cheat evasion and responsiveness.
-		 * Allowed range: 0-500ms
-		 */
 		var swapDelayMs: Int = 100,
-
-		/**
-		 * When enabled, clicks the replacement totem immediately after it is found.
-		 */
 		var instantClickTotem: Boolean = false,
-
-		/**
-		 * When enabled, places replacement totems into a selected hotbar slot
-		 * instead of the offhand slot.
-		 */
 		var itemSlotReplace: Boolean = false,
-
-		/**
-		 * 1-based hotbar slot index used when item slot replace mode is enabled.
-		 * Allowed range: 1-9
-		 */
 		var itemSlotReplaceHotbarSlot: Int = 1,
-
-		/**
-		 * When enabled, item slot replace mode only runs if the configured hotbar slot
-		 * is currently selected by the player.
-		 */
 		var autoSelectItemSlot: Boolean = false,
-		
-		/**
-		 * Enable/disable the auto-totem feature.
-		 */
 		var enabled: Boolean = true,
+		var debugMode: Boolean = false,
 
-		/**
-		 * Enable verbose state-machine logs for troubleshooting.
-		 */
-		var debugMode: Boolean = false
+		// Inventory totem settings
+		var inventoryTotemEnabled: Boolean = true,
+		var inventoryTotemMode: String = "AUTO",
+		var inventoryTotemPriority: String = "NORMAL",
+		var inventoryTotemEmergencyOnly: Boolean = false,
 	)
 	
-	/**
-	 * Load configuration from file, or create default if it doesn't exist.
-	 */
 	fun loadConfig() {
 		try {
 			if (!configFile.exists()) {
@@ -75,8 +46,15 @@ object ConfigManager {
 				config = gson.fromJson(json, TotemConfig::class.java) ?: TotemConfig()
 				config.swapDelayMs = config.swapDelayMs.coerceIn(0, 500)
 				config.itemSlotReplaceHotbarSlot = config.itemSlotReplaceHotbarSlot.coerceIn(1, 9)
+				config.inventoryTotemMode = config.inventoryTotemMode.uppercase()
+					.takeIf { it in listOf("AUTO", "MANUAL", "DISABLED") } ?: "AUTO"
+				config.inventoryTotemPriority = config.inventoryTotemPriority.uppercase()
+					.takeIf { it in listOf("HIGH", "NORMAL", "LOW") } ?: "NORMAL"
 				logger.info(
-					"Loaded config: swapDelayMs=${config.swapDelayMs}, instantClickTotem=${config.instantClickTotem}, itemSlotReplace=${config.itemSlotReplace}, itemSlotReplaceHotbarSlot=${config.itemSlotReplaceHotbarSlot}, autoSelectItemSlot=${config.autoSelectItemSlot}, enabled=${config.enabled}, debugMode=${config.debugMode}"
+					"Loaded config: enabled=${config.enabled}, swapDelayMs=${config.swapDelayMs}, " +
+					"instantClickTotem=${config.instantClickTotem}, itemSlotReplace=${config.itemSlotReplace}, " +
+					"inventoryTotemEnabled=${config.inventoryTotemEnabled}, inventoryTotemMode=${config.inventoryTotemMode}, " +
+					"inventoryTotemPriority=${config.inventoryTotemPriority}, inventoryTotemEmergencyOnly=${config.inventoryTotemEmergencyOnly}"
 				)
 			}
 		} catch (e: Exception) {
@@ -85,9 +63,6 @@ object ConfigManager {
 		}
 	}
 	
-	/**
-	 * Save current configuration to file.
-	 */
 	fun saveConfig() {
 		try {
 			createConfigDir()
@@ -103,94 +78,76 @@ object ConfigManager {
 		Files.createDirectories(configDir)
 	}
 	
-	/**
-	 * Get the current swap delay in milliseconds.
-	 */
 	fun getSwapDelayMs(): Int = config.swapDelayMs
-	
-	/**
-	 * Set the swap delay in milliseconds.
-	 */
 	fun setSwapDelayMs(delayMs: Int) {
 		config.swapDelayMs = delayMs.coerceIn(0, 500)
 		saveConfig()
 	}
 
-	/**
-	 * Check if instant-click mode is enabled.
-	 */
 	fun isInstantClickTotemEnabled(): Boolean = config.instantClickTotem
-
-	/**
-	 * Enable or disable instant-click mode.
-	 */
 	fun setInstantClickTotemEnabled(enabled: Boolean) {
 		config.instantClickTotem = enabled
 		saveConfig()
 	}
 
-	/**
-	 * Check if item slot replace mode is enabled.
-	 */
 	fun isItemSlotReplaceEnabled(): Boolean = config.itemSlotReplace
-
-	/**
-	 * Enable or disable item slot replace mode.
-	 */
 	fun setItemSlotReplaceEnabled(enabled: Boolean) {
 		config.itemSlotReplace = enabled
 		saveConfig()
 	}
 
-	/**
-	 * Get selected target hotbar slot for item slot replace mode (1-9).
-	 */
 	fun getItemSlotReplaceHotbarSlot(): Int = config.itemSlotReplaceHotbarSlot
-
-	/**
-	 * Set selected target hotbar slot for item slot replace mode (1-9).
-	 */
 	fun setItemSlotReplaceHotbarSlot(slot: Int) {
 		config.itemSlotReplaceHotbarSlot = slot.coerceIn(1, 9)
 		saveConfig()
 	}
 
-	/**
-	 * Check if item slot mode should only run when selected slot matches target slot.
-	 */
 	fun isAutoSelectItemSlotEnabled(): Boolean = config.autoSelectItemSlot
-
-	/**
-	 * Enable or disable selected-slot gating for item slot mode.
-	 */
 	fun setAutoSelectItemSlotEnabled(enabled: Boolean) {
 		config.autoSelectItemSlot = enabled
 		saveConfig()
 	}
 	
-	/**
-	 * Check if the auto-totem feature is enabled.
-	 */
 	fun isEnabled(): Boolean = config.enabled
-	
-	/**
-	 * Enable or disable the auto-totem feature.
-	 */
 	fun setEnabled(enabled: Boolean) {
 		config.enabled = enabled
 		saveConfig()
 	}
 
-	/**
-	 * Check if debug mode is enabled.
-	 */
 	fun isDebugModeEnabled(): Boolean = config.debugMode
-
-	/**
-	 * Enable or disable debug mode.
-	 */
 	fun setDebugModeEnabled(enabled: Boolean) {
 		config.debugMode = enabled
+		saveConfig()
+	}
+
+	fun isInventoryTotemEnabled(): Boolean = config.inventoryTotemEnabled
+	fun setInventoryTotemEnabled(enabled: Boolean) {
+		config.inventoryTotemEnabled = enabled
+		saveConfig()
+	}
+
+	fun getInventoryTotemMode(): String = config.inventoryTotemMode
+	fun setInventoryTotemMode(mode: String) {
+		config.inventoryTotemMode = mode.uppercase()
+			.takeIf { it in listOf("AUTO", "MANUAL", "DISABLED") } ?: "AUTO"
+		saveConfig()
+	}
+
+	fun getInventoryTotemPriority(): String = config.inventoryTotemPriority
+	fun setInventoryTotemPriority(priority: String) {
+		config.inventoryTotemPriority = priority.uppercase()
+			.takeIf { it in listOf("HIGH", "NORMAL", "LOW") } ?: "NORMAL"
+		saveConfig()
+	}
+
+	fun isInventoryTotemEmergencyOnly(): Boolean = config.inventoryTotemEmergencyOnly
+	fun setInventoryTotemEmergencyOnly(enabled: Boolean) {
+		config.inventoryTotemEmergencyOnly = enabled
+		saveConfig()
+	}
+
+	fun resetToDefaults() {
+		config = TotemConfig()
 		saveConfig()
 	}
 }
