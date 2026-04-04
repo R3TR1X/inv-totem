@@ -204,11 +204,12 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
     private fun addCycleButton(x: Int, y: Int, w: Int, label: String,
                                 current: String, values: List<String>,
                                 tip: String, onChange: (String) -> Unit) {
-        val btn = Button.builder(Component.literal("$label: $current")) { button ->
-            val idx = (values.indexOf(current) + 1) % values.size
-            val next = values[idx]
-            onChange(next)
-            button.message = Component.literal("$label: $next")
+        var tracked = current
+        val btn = Button.builder(Component.literal("$label: $tracked")) { button ->
+            val idx = (values.indexOf(tracked) + 1) % values.size
+            tracked = values[idx]
+            onChange(tracked)
+            button.message = Component.literal("$label: $tracked")
         }.bounds(x, y, w, 20)
          .tooltip(Tooltip.create(Component.literal(tip)))
          .build()
@@ -321,7 +322,7 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
         g.drawString(font, label, wLeft, y - 12, SECTION_BLUE, true)
         // Underline
         val lw = font.width(label)
-        g.fill(wLeft, y - 2, wLeft + lw, y - 1, (0x60_64B5F6).toInt())
+        g.fill(wLeft, y - 2, wLeft + lw, y - 1, 0x60_64B5F6)
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -423,7 +424,7 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
     private class TabButton(
         x: Int, y: Int, w: Int, h: Int,
         private val label: String,
-        private val active: Boolean,
+        private val selected: Boolean,
         private val onPress: () -> Unit,
     ) : AbstractWidget(x, y, w, h, Component.literal(label)) {
 
@@ -433,24 +434,24 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
             val mc = Minecraft.getInstance()
             val g = guiGraphics
             val bg = when {
-                active -> TAB_ACTIVE_BG
+                selected -> TAB_ACTIVE_BG
                 isHovered -> WIDGET_HOVER
                 else -> TAB_INACTIVE
             }
             g.fill(x, y, x + width, y + height, bg)
 
             // Active indicator bar at bottom
-            if (active) {
+            if (selected) {
                 g.fill(x, y + height - 2, x + width, y + height, ACCENT_PURPLE)
             }
 
             // Border
-            val brd = if (active) ACCENT_PURPLE else BORDER_DIM
+            val brd = if (selected) ACCENT_PURPLE else BORDER_DIM
             g.fill(x, y, x + width, y + 1, brd)
             g.fill(x, y, x + 1, y + height, brd)
             g.fill(x + width - 1, y, x + width, y + height, brd)
 
-            val textColor = if (active) 0xFFFFFFFF.toInt() else TEXT_DIM
+            val textColor = if (selected) 0xFFFFFFFF.toInt() else TEXT_DIM
             val tw = mc.font.width(label)
             g.drawString(mc.font, label, x + (width - tw) / 2, y + (height - 8) / 2, textColor, true)
         }
