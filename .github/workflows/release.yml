@@ -1,0 +1,45 @@
+# Automatically create a GitHub Release with the built jar
+# when a version tag (v*) is pushed.
+
+name: release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v4
+
+      - name: validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: setup jdk
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: build
+        run: ./gradlew build
+
+      - name: get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: create github release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Inv Totem ${{ steps.version.outputs.VERSION }}"
+          generate_release_notes: true
+          files: |
+            build/libs/inv-totem-*.jar
+            !build/libs/*-sources.jar
