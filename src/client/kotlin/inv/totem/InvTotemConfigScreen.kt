@@ -34,6 +34,7 @@ private val ACCENT_PURPLE  = 0xFF7C4DFF.toInt()
 private val SECTION_BLUE   = 0xFF64B5F6.toInt()
 private val TAB_ACTIVE_BG  = 0xFF3A2A6E.toInt()
 private val TAB_INACTIVE   = 0xFF1E1E34.toInt()
+private val SLIDER_TRACK   = 0xFF1A1A30.toInt()
 
 // ─── HSB → packed-ARGB helper ───────────────────────────────────────────────────
 private fun hsbToArgb(hue: Float, sat: Float, bri: Float): Int {
@@ -54,6 +55,17 @@ private fun hsbToArgb(hue: Float, sat: Float, bri: Float): Int {
            ((r * 255).toInt().coerceIn(0, 255) shl 16) or
            ((g * 255).toInt().coerceIn(0, 255) shl 8) or
            (b * 255).toInt().coerceIn(0, 255)
+}
+
+// ─── Layout Constants ───────────────────────────────────────────────────────────
+private object Layout {
+    const val ELEMENT_HEIGHT = 20
+    const val ELEMENT_SPACING = 24
+    const val SECTION_GAP = 12         // extra gap before a section header
+    const val SECTION_LABEL_HEIGHT = 14 // space the label text occupies
+    const val TAB_HEIGHT = 20
+    const val TAB_GAP = 4
+    const val CONTENT_PAD_TOP = 6     // gap between tab bar bottom → first content
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════
@@ -82,10 +94,13 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
     private enum class Page { GENERAL, INV_TOTEM, SLOT_MODE }
     private var page = Page.GENERAL
 
-    // ── Layout constants (computed once in init) ────────────────────────────────
+    // ── Layout (computed once in init) ───────────────────────────────────────────
     private var panelW = 0; private var panelH = 0
     private var panelLeft = 0; private var panelTop = 0
     private var wLeft = 0; private var wWidth = 0
+
+    // ── Section header y-positions (filled during build, drawn during render) ───
+    private val sectionHeaders = mutableListOf<Pair<Int, String>>() // (y, label)
 
     // ════════════════════════════════════════════════════════════════════════════
     //  Lifecycle
@@ -108,43 +123,46 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
     // ════════════════════════════════════════════════════════════════════════════
     override fun rebuildWidgets() {
         clearWidgets()
+        sectionHeaders.clear()
+
         val tabY = panelTop + 30
-        val contentY = tabY + 26
+        val contentY = tabY + Layout.TAB_HEIGHT + Layout.CONTENT_PAD_TOP
 
-        // ── Tab buttons ─────────────────────────────────────────────────────────
-        val tabW = (wWidth - 8) / 3
-        addTab(wLeft, tabY, tabW, "General",    Page.GENERAL)
-        addTab(wLeft + tabW + 4, tabY, tabW, "Inv. Totem", Page.INV_TOTEM)
-        addTab(wLeft + (tabW + 4) * 2, tabY, tabW, "Slot Mode", Page.SLOT_MODE)
+        // ── Tab buttons (use vanilla Button so click dispatch is guaranteed) ────
+        val tabW = (wWidth - Layout.TAB_GAP * 2) / 3
+        addTab(wLeft, tabY, tabW, "General", Page.GENERAL)
+        addTab(wLeft + tabW + Layout.TAB_GAP, tabY, tabW, "Inv. Totem", Page.INV_TOTEM)
+        addTab(wLeft + (tabW + Layout.TAB_GAP) * 2, tabY, tabW, "Slot Mode", Page.SLOT_MODE)
 
-        var y = contentY + 6
-        val sp = 24
+        var y = contentY
+        val sp = Layout.ELEMENT_SPACING
 
         when (page) {
             Page.GENERAL -> {
-                y = sectionHeader(y, "\u2699 General")
-                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, 20, "\u26A1", "Auto-Totem", enabled,
-                    "ENABLED", "DISABLED",
+                y = addSectionHeader(y, "\u2699 General")
+                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, Layout.ELEMENT_HEIGHT,
+                    "\u26A1", "Auto-Totem", enabled, "ENABLED", "DISABLED",
                     "Master toggle for the entire totem macro.") { enabled = it })
                 y += sp
-                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, 20, "\u26A1", "Instant Click", instantClick,
-                    "ON", "OFF",
+                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, Layout.ELEMENT_HEIGHT,
+                    "\u26A1", "Instant Click", instantClick, "ON", "OFF",
                     "Skip safety buffer and click immediately.") { instantClick = it })
                 y += sp
-                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, 20, "\uD83D\uDC1B", "Debug Mode", debugMode,
-                    "ON", "OFF",
+                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, Layout.ELEMENT_HEIGHT,
+                    "\uD83D\uDC1B", "Debug Mode", debugMode, "ON", "OFF",
                     "Log verbose state-machine output.") { debugMode = it })
-                y += sp + 4
-                y = sectionHeader(y, "\u23F1 Timing")
+                y += sp + Layout.SECTION_GAP
+                y = addSectionHeader(y, "\u23F1 Timing")
                 addRenderableWidget(
-                    StyledSlider(wLeft, y, wWidth, 20, selectedDelayMs) { selectedDelayMs = it }
+                    StyledSlider(wLeft, y, wWidth, Layout.ELEMENT_HEIGHT, selectedDelayMs) {
+                        selectedDelayMs = it
+                    }
                 )
-                y += sp
             }
             Page.INV_TOTEM -> {
-                y = sectionHeader(y, "\uD83D\uDCE6 Inventory Totem")
-                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, 20, "\uD83D\uDCE6", "Inv. Totem Replace", invTotemEnabled,
-                    "ENABLED", "DISABLED",
+                y = addSectionHeader(y, "\uD83D\uDCE6 Inventory Totem")
+                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, Layout.ELEMENT_HEIGHT,
+                    "\uD83D\uDCE6", "Inv. Totem Replace", invTotemEnabled, "ENABLED", "DISABLED",
                     "Pull totems from inventory to replace.") { invTotemEnabled = it })
                 y += sp
                 addCycleButton(wLeft, y, wWidth, "Mode", invTotemMode,
@@ -155,25 +173,23 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
                     listOf("HIGH", "NORMAL", "LOW"),
                     "HIGH = instant, NORMAL = humanized, LOW = extra safe.") { invTotemPriority = it }
                 y += sp
-                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, 20, "\u2764", "Emergency Only", invTotemEmergencyOnly,
-                    "ON", "OFF",
+                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, Layout.ELEMENT_HEIGHT,
+                    "\u2764", "Emergency Only", invTotemEmergencyOnly, "ON", "OFF",
                     "Only activate below 4 hearts.") { invTotemEmergencyOnly = it })
-                y += sp
             }
             Page.SLOT_MODE -> {
-                y = sectionHeader(y, "\u2699 Slot Mode")
-                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, 20, "\uD83D\uDD27", "Slot Replace", slotReplaceEnabled,
-                    "ENABLED", "DISABLED",
+                y = addSectionHeader(y, "\u2699 Slot Mode")
+                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, Layout.ELEMENT_HEIGHT,
+                    "\uD83D\uDD27", "Slot Replace", slotReplaceEnabled, "ENABLED", "DISABLED",
                     "Replace into a hotbar slot instead of offhand.") { slotReplaceEnabled = it })
                 y += sp
                 addCycleButton(wLeft, y, wWidth, "Target Slot", slotReplaceHotbarSlot.toString(),
                     (1..9).map { it.toString() },
                     "Hotbar slot to place the totem.") { slotReplaceHotbarSlot = it.toInt() }
                 y += sp
-                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, 20, "\uD83C\uDFAF", "Auto Select", autoSelectSlot,
-                    "ON", "OFF",
+                addRenderableWidget(ToggleWidget(wLeft, y, wWidth, Layout.ELEMENT_HEIGHT,
+                    "\uD83C\uDFAF", "Auto Select", autoSelectSlot, "ON", "OFF",
                     "Only replace if selected slot matches target.") { autoSelectSlot = it })
-                y += sp
             }
         }
 
@@ -194,11 +210,20 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
         )
     }
 
-    // ── Helpers to add tabs / cycle buttons ──────────────────────────────────────
+    // ── Helpers ─────────────────────────────────────────────────────────────────
     private fun addTab(x: Int, y: Int, w: Int, label: String, target: Page) {
-        addRenderableWidget(TabButton(x, y, w, 20, label, page == target) {
-            page = target; rebuildWidgets()
+        addRenderableWidget(TabButton(x, y, w, Layout.TAB_HEIGHT, label, page == target) {
+            if (page != target) {
+                page = target
+                rebuildWidgets()
+            }
         })
+    }
+
+    /** Records a section header position and advances y past the label area. */
+    private fun addSectionHeader(y: Int, label: String): Int {
+        sectionHeaders.add(y to label)
+        return y + Layout.SECTION_LABEL_HEIGHT
     }
 
     private fun addCycleButton(x: Int, y: Int, w: Int, label: String,
@@ -210,16 +235,10 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
             tracked = values[idx]
             onChange(tracked)
             button.message = Component.literal("$label: $tracked")
-        }.bounds(x, y, w, 20)
+        }.bounds(x, y, w, Layout.ELEMENT_HEIGHT)
          .tooltip(Tooltip.create(Component.literal(tip)))
          .build()
         addRenderableWidget(btn)
-    }
-
-    /** Returns the y coordinate after the section header. */
-    private fun sectionHeader(@Suppress("UNUSED_PARAMETER") y: Int, @Suppress("UNUSED_PARAMETER") label: String): Int {
-        // Section headers are rendered manually in render() pass
-        return y
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -242,23 +261,16 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
         // ── Gradient title ──────────────────────────────────────────────────────
         renderGradientTitle(g)
 
-        // ── Section headers per page ────────────────────────────────────────────
-        val tabY = pt + 30
-        val contentY = tabY + 26 + 6
-        when (page) {
-            Page.GENERAL -> {
-                drawSectionLabel(g, contentY, "\u2699 General")
-                drawSectionLabel(g, contentY + 24 * 3 + 4, "\u23F1 Timing")
-            }
-            Page.INV_TOTEM -> drawSectionLabel(g, contentY, "\uD83D\uDCE6 Inventory Totem")
-            Page.SLOT_MODE -> drawSectionLabel(g, contentY, "\u2699 Slot Mode")
+        // ── Section headers (drawn before widgets so text sits behind controls) ─
+        for ((sy, label) in sectionHeaders) {
+            drawSectionLabel(g, sy, label)
         }
 
         // ── Widgets (via super) ─────────────────────────────────────────────────
         super.render(guiGraphics, mouseX, mouseY, partialTick)
 
         // ── Footer ──────────────────────────────────────────────────────────────
-        val footer = "sfblair - v1.0.5"
+        val footer = "sfblair - v1.0.8"
         val fx = (width - font.width(footer)) / 2
         g.drawString(font, footer, fx, pt + ph - 14, TEXT_DIM, false)
     }
@@ -318,11 +330,10 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
 
     // ── Section label ───────────────────────────────────────────────────────────
     private fun drawSectionLabel(g: GuiGraphics, y: Int, label: String) {
-        // Rendered above widgets so they look like section separators
-        g.drawString(font, label, wLeft, y - 12, SECTION_BLUE, true)
-        // Underline
+        g.drawString(font, label, wLeft, y + 2, SECTION_BLUE, true)
         val lw = font.width(label)
-        g.fill(wLeft, y - 2, wLeft + lw, y - 1, 0x60_64B5F6)
+        g.fill(wLeft, y + Layout.SECTION_LABEL_HEIGHT - 2, wLeft + lw,
+               y + Layout.SECTION_LABEL_HEIGHT - 1, 0x60_64B5F6)
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -347,7 +358,6 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
 
     private fun resetDefaults() {
         ConfigManager.resetToDefaults()
-        // Reload mirrors from fresh defaults
         enabled = true; instantClick = false; debugMode = false; selectedDelayMs = 100
         invTotemEnabled = true; invTotemMode = "AUTO"; invTotemPriority = "NORMAL"; invTotemEmergencyOnly = false
         slotReplaceEnabled = false; slotReplaceHotbarSlot = 1; autoSelectSlot = false
@@ -360,6 +370,7 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
 
     /**
      * Stylish toggle widget: icon + label left, colored status pill right.
+     * Uses mouseClicked override for guaranteed click dispatch.
      */
     private class ToggleWidget(
         x: Int, y: Int, w: Int, h: Int,
@@ -373,8 +384,6 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
     ) : AbstractWidget(x, y, w, h, Component.literal(label)) {
 
         init { setTooltip(Tooltip.create(Component.literal(tip))) }
-
-        val state get() = toggled
 
         override fun onClick(event: MouseButtonEvent, pressed: Boolean) {
             if (pressed) {
@@ -414,7 +423,8 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
         }
 
         override fun updateWidgetNarration(output: NarrationElementOutput) {
-            output.add(NarratedElementType.TITLE, Component.literal("$label: ${if (toggled) onText else offText}"))
+            output.add(NarratedElementType.TITLE,
+                Component.literal("$label: ${if (toggled) onText else offText}"))
         }
     }
 
@@ -428,7 +438,9 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
         private val onPress: () -> Unit,
     ) : AbstractWidget(x, y, w, h, Component.literal(label)) {
 
-        override fun onClick(event: MouseButtonEvent, pressed: Boolean) { if (pressed) onPress() }
+        override fun onClick(event: MouseButtonEvent, pressed: Boolean) {
+            if (pressed) onPress()
+        }
 
         override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
             val mc = Minecraft.getInstance()
@@ -463,7 +475,7 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════
-//  Styled delay slider (dark themed, reuses existing logic)
+//  Styled delay slider (themed to match toggle widgets)
 // ═════════════════════════════════════════════════════════════════════════════════
 private class StyledSlider(
     x: Int, y: Int, w: Int, h: Int,
@@ -486,6 +498,57 @@ private class StyledSlider(
         delayMs = currentMs()
         onValueChanged(delayMs)
         updateMessage()
+    }
+
+    override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        val mc = Minecraft.getInstance()
+        val g = guiGraphics
+        val bg = if (isHovered) WIDGET_HOVER else WIDGET_BG
+        val brd = if (isHovered) BORDER_BRIGHT else BORDER_DIM
+
+        // Background — matches toggle widget style
+        g.fill(x, y, x + width, y + height, bg)
+
+        // Border — matches toggle widget style
+        g.fill(x, y, x + width, y + 1, brd)
+        g.fill(x, y + height - 1, x + width, y + height, brd)
+        g.fill(x, y, x + 1, y + height, brd)
+        g.fill(x + width - 1, y, x + width, y + height, brd)
+
+        // Label text (left side)
+        val label = "\u23F1 Swap Delay"
+        val textY = y + (height - 8) / 2
+        g.drawString(mc.font, label, x + 6, textY, TEXT_PRIMARY, true)
+
+        // Value text (right side) — purple accent to match theme
+        val valueText = "${currentMs()}ms"
+        val valueWidth = mc.font.width(valueText)
+        g.drawString(mc.font, valueText, x + width - valueWidth - 8, textY, ACCENT_PURPLE, true)
+
+        // Track (thin bar between label and value display)
+        val labelEnd = x + 6 + mc.font.width(label) + 8
+        val valueStart = x + width - valueWidth - 16
+        val trackY = y + height / 2 - 1
+        val trackH = 3
+
+        // Track background
+        g.fill(labelEnd, trackY, valueStart, trackY + trackH, SLIDER_TRACK)
+
+        // Track fill (purple)
+        val progress = value.toFloat()
+        val fillW = ((valueStart - labelEnd) * progress).toInt()
+        if (fillW > 0) {
+            g.fill(labelEnd, trackY, labelEnd + fillW, trackY + trackH, ACCENT_PURPLE)
+        }
+
+        // Handle dot
+        val handleX = labelEnd + fillW
+        val handleR = 4
+        val handleCY = y + height / 2
+        g.fill(handleX - handleR, handleCY - handleR,
+               handleX + handleR, handleCY + handleR, 0xFFFFFFFF.toInt())
+        g.fill(handleX - handleR + 1, handleCY - handleR + 1,
+               handleX + handleR - 1, handleCY + handleR - 1, ACCENT_PURPLE)
     }
 
     private fun currentMs(): Int =
