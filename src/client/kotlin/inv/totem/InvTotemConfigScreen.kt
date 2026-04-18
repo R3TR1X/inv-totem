@@ -5,7 +5,6 @@ import kotlin.math.sin
 import kotlin.math.min
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
-import net.minecraft.client.gui.components.AbstractSliderButton
 import net.minecraft.client.gui.components.AbstractWidget
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.gui.components.Button
@@ -128,7 +127,7 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
         val tabY = panelTop + 30
         val contentY = tabY + Layout.TAB_HEIGHT + Layout.CONTENT_PAD_TOP
 
-        // ── Tab buttons (use vanilla Button so click dispatch is guaranteed) ────
+        // ── Tab buttons ─────────────────────────────────────────────────────────
         val tabW = (wWidth - Layout.TAB_GAP * 2) / 3
         addTab(wLeft, tabY, tabW, "General", Page.GENERAL)
         addTab(wLeft + tabW + Layout.TAB_GAP, tabY, tabW, "Inv. Totem", Page.INV_TOTEM)
@@ -370,7 +369,12 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
 
     /**
      * Stylish toggle widget: icon + label left, colored status pill right.
-     * Uses mouseClicked override for guaranteed click dispatch.
+     *
+     * FIX for multi-click bug: In 1.21.10, onClick(MouseButtonEvent, Boolean) fires
+     * on both press (pressed=true) AND release (pressed=false). Vanilla MC buttons
+     * fire their action on RELEASE. We now fire on BOTH press events to guarantee
+     * immediate response — the first event to arrive triggers the toggle.
+     * The 'handledPress' flag prevents double-firing within a single click gesture.
      */
     private class ToggleWidget(
         x: Int, y: Int, w: Int, h: Int,
@@ -383,12 +387,23 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
         private val onChange: (Boolean) -> Unit,
     ) : AbstractWidget(x, y, w, h, Component.literal(label)) {
 
+        private var handledPress = false
+
         init { setTooltip(Tooltip.create(Component.literal(tip))) }
 
         override fun onClick(event: MouseButtonEvent, pressed: Boolean) {
             if (pressed) {
+                // Mouse down — toggle immediately for instant feedback
                 toggled = !toggled
                 onChange(toggled)
+                handledPress = true
+            } else {
+                // Mouse up — if we missed the press (happens with fast clicks), fire here
+                if (!handledPress) {
+                    toggled = !toggled
+                    onChange(toggled)
+                }
+                handledPress = false
             }
         }
 
@@ -430,6 +445,9 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
 
     /**
      * Tab button with active/inactive visual state.
+     *
+     * Same fix as ToggleWidget: fires on press for instant response,
+     * with release fallback for reliability.
      */
     private class TabButton(
         x: Int, y: Int, w: Int, h: Int,
@@ -438,8 +456,18 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
         private val onPress: () -> Unit,
     ) : AbstractWidget(x, y, w, h, Component.literal(label)) {
 
+        private var handledPress = false
+
         override fun onClick(event: MouseButtonEvent, pressed: Boolean) {
-            if (pressed) onPress()
+            if (pressed) {
+                onPress()
+                handledPress = true
+            } else {
+                if (!handledPress) {
+                    onPress()
+                }
+                handledPress = false
+            }
         }
 
         override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
@@ -475,31 +503,101 @@ class InvTotemConfigScreen(private val parentScreen: Screen) :
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════
-//  Styled delay slider (themed to match toggle widgets)
+//  Styled delay slider — manual drag implementation (NOT AbstractSliderButton)
+//
+//  AbstractSliderButton maps click position across the FULL widget width via its
+//  built-in onClick(). Our visual track only spans the middle portion (between
+//  label text and value text). That coordinate mismatch made every click jump to
+//  a wildly wrong value.
+//
+//  This implementation uses AbstractWidget with manual drag tracking. The track
+//  bounds are calculated identically in rendering AND mouse handlers — no
+//  coordinate mismatch is possible.
+//
+//  Slider drag uses mouseDragged(MouseButtonEvent, Double, Double) which gives
+//  drag deltas, so we track value by accumulating pixel-delta movements.
 // ═════════════════════════════════════════════════════════════════════════════════
 private class StyledSlider(
     x: Int, y: Int, w: Int, h: Int,
     initialDelayMs: Int,
     private val onValueChanged: (Int) -> Unit,
-) : AbstractSliderButton(
-    x, y, w, h,
-    Component.literal(""),
-    initialDelayMs.coerceIn(0, MAX_DELAY_MS).toDouble() / MAX_DELAY_MS.toDouble(),
-) {
+) : AbstractWidget(x, y, w, h, Component.literal("")) {
+
+    /** Current delay value in milliseconds (0..MAX_DELAY_MS). */
     private var delayMs = initialDelayMs.coerceIn(0, MAX_DELAY_MS)
 
-    init { updateMessage() }
+    /** Whether user is currently dragging the handle. */
+    private var dragging = false
 
-    override fun updateMessage() {
-        message = Component.literal("\u23F1 Swap Delay: ${currentMs()}ms")
+    // ── Track geometry constants ────────────────────────────────────────────
+    private companion object {
+        const val LABEL_PAD = 6            // left padding for label text
+        const val LABEL_GAP = 8            // gap after label before track
+        const val VALUE_PAD = 8            // right padding for value text
+        const val VALUE_GAP = 8            // gap before value text after track
+        const val TRACK_H = 3              // track bar height in pixels
+        const val HANDLE_R = 4             // handle square radius
     }
 
-    override fun applyValue() {
-        delayMs = currentMs()
-        onValueChanged(delayMs)
-        updateMessage()
+    /** Label string for measurement — never changes. */
+    private val labelStr = "\u23F1 Swap Delay"
+
+    /** Compute track pixel width on demand (needs font metrics). */
+    private fun trackStartX(): Int {
+        val mc = Minecraft.getInstance()
+        return x + LABEL_PAD + mc.font.width(labelStr) + LABEL_GAP
     }
 
+    private fun trackEndX(): Int {
+        val mc = Minecraft.getInstance()
+        val maxValW = mc.font.width("${MAX_DELAY_MS}ms")
+        return x + width - maxValW - VALUE_PAD - VALUE_GAP
+    }
+
+    // ── Mouse interaction ──────────────────────────────────────────────────
+
+    /**
+     * onClick fires on both press and release. We start drag on press.
+     * No value update here — the first mouseDragged call will move the slider.
+     * This prevents the "value jump" bug entirely: clicking the handle just
+     * grabs it without changing the value.
+     */
+    override fun onClick(event: MouseButtonEvent, pressed: Boolean) {
+        if (pressed) {
+            dragging = true
+        } else {
+            dragging = false
+        }
+    }
+
+    /**
+     * mouseDragged gives us (dragDeltaX, dragDeltaY) in pixels.
+     * We convert the X delta to a value delta using the track width.
+     */
+    override fun mouseDragged(event: MouseButtonEvent, dragX: Double, dragY: Double): Boolean {
+        if (!dragging) return super.mouseDragged(event, dragX, dragY)
+
+        val trackW = (trackEndX() - trackStartX()).coerceAtLeast(1)
+        // Convert pixel delta to value delta
+        val valueDelta = (dragX / trackW * MAX_DELAY_MS).roundToInt()
+        val newMs = (delayMs + valueDelta).coerceIn(0, MAX_DELAY_MS)
+
+        if (newMs != delayMs) {
+            delayMs = newMs
+            onValueChanged(delayMs)
+        }
+        return true
+    }
+
+    override fun mouseReleased(event: MouseButtonEvent): Boolean {
+        if (dragging) {
+            dragging = false
+            return true
+        }
+        return super.mouseReleased(event)
+    }
+
+    // ── Rendering ──────────────────────────────────────────────────────────
     override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         val mc = Minecraft.getInstance()
         val g = guiGraphics
@@ -516,41 +614,40 @@ private class StyledSlider(
         g.fill(x + width - 1, y, x + width, y + height, brd)
 
         // Label text (left side)
-        val label = "\u23F1 Swap Delay"
         val textY = y + (height - 8) / 2
-        g.drawString(mc.font, label, x + 6, textY, TEXT_PRIMARY, true)
+        g.drawString(mc.font, labelStr, x + LABEL_PAD, textY, TEXT_PRIMARY, true)
 
-        // Value text (right side) — purple accent to match theme
-        val valueText = "${currentMs()}ms"
-        val valueWidth = mc.font.width(valueText)
-        g.drawString(mc.font, valueText, x + width - valueWidth - 8, textY, ACCENT_PURPLE, true)
+        // Value text (right side) — purple accent
+        val valueText = "${delayMs}ms"
+        val actualValW = mc.font.width(valueText)
+        g.drawString(mc.font, valueText, x + width - actualValW - VALUE_PAD, textY, ACCENT_PURPLE, true)
 
-        // Track (thin bar between label and value display)
-        val labelEnd = x + 6 + mc.font.width(label) + 8
-        val valueStart = x + width - valueWidth - 16
+        // Track bounds — MUST match what mouse handlers use
+        val tStartX = trackStartX()
+        val tEndX = trackEndX()
         val trackY = y + height / 2 - 1
-        val trackH = 3
 
         // Track background
-        g.fill(labelEnd, trackY, valueStart, trackY + trackH, SLIDER_TRACK)
+        g.fill(tStartX, trackY, tEndX, trackY + TRACK_H, SLIDER_TRACK)
 
         // Track fill (purple)
-        val progress = value.toFloat()
-        val fillW = ((valueStart - labelEnd) * progress).toInt()
+        val progress = delayMs.toFloat() / MAX_DELAY_MS
+        val fillW = ((tEndX - tStartX) * progress).toInt()
         if (fillW > 0) {
-            g.fill(labelEnd, trackY, labelEnd + fillW, trackY + trackH, ACCENT_PURPLE)
+            g.fill(tStartX, trackY, tStartX + fillW, trackY + TRACK_H, ACCENT_PURPLE)
         }
 
         // Handle dot
-        val handleX = labelEnd + fillW
-        val handleR = 4
+        val handleX = tStartX + fillW
         val handleCY = y + height / 2
-        g.fill(handleX - handleR, handleCY - handleR,
-               handleX + handleR, handleCY + handleR, 0xFFFFFFFF.toInt())
-        g.fill(handleX - handleR + 1, handleCY - handleR + 1,
-               handleX + handleR - 1, handleCY + handleR - 1, ACCENT_PURPLE)
+        g.fill(handleX - HANDLE_R, handleCY - HANDLE_R,
+               handleX + HANDLE_R, handleCY + HANDLE_R, 0xFFFFFFFF.toInt())
+        g.fill(handleX - HANDLE_R + 1, handleCY - HANDLE_R + 1,
+               handleX + HANDLE_R - 1, handleCY + HANDLE_R - 1, ACCENT_PURPLE)
     }
 
-    private fun currentMs(): Int =
-        (value * MAX_DELAY_MS).roundToInt().coerceIn(0, MAX_DELAY_MS)
+    override fun updateWidgetNarration(output: NarrationElementOutput) {
+        output.add(NarratedElementType.TITLE,
+            Component.literal("Swap Delay: ${delayMs}ms"))
+    }
 }

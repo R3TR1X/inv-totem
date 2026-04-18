@@ -1,0 +1,35 @@
+
+> Configure project :
+Fabric Loom: 1.15.5
+
+> Task :clean
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :processResources
+> Task :processClientResources
+> Task :processIncludeJars
+> Task :sourcesJar
+> Task :processTestResources NO-SOURCE
+> Task :validateAccessWidener NO-SOURCE
+> Task :remapSourcesJar
+> Task :compileKotlin
+> Task :compileJava
+> Task :classes
+
+> Task :compileClientKotlin
+w: file:///C:/Users/sfblair/Documents/my%20projects/inv-totem-1.21.10/src/client/kotlin/inv/totem/InvTotemConfigScreen.kt:324:63 Redundant call of conversion method.
+w: file:///C:/Users/sfblair/Documents/my%20projects/inv-totem-1.21.10/src/client/kotlin/inv/totem/InvTotemConfigScreen.kt:426:21 This property hides Java field 'field active: Boolean' thus making it inaccessible.
+
+> Task :compileClientJava
+> Task :jar
+> Task :clientClasses
+> Task :compileTestKotlin NO-SOURCE
+> Task :compileTestJava NO-SOURCE
+> Task :testClasses UP-TO-DATE
+> Task :test NO-SOURCE
+> Task :check UP-TO-DATE
+> Task :remapJar
+> Task :assemble
+> Task :build
+
+BUILD SUCCESSFUL in 15s
+12 actionable tasks: 12 executed

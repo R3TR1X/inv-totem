@@ -1,0 +1,31 @@
+Starting a Gradle Daemon, 4 incompatible and 2 stopped Daemons could not be reused, use --status for details
+
+> Configure project :
+Fabric Loom: 1.15.5
+
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :compileKotlin UP-TO-DATE
+> Task :compileJava UP-TO-DATE
+> Task :processResources
+> Task :classes
+> Task :processClientResources UP-TO-DATE
+> Task :processIncludeJars UP-TO-DATE
+> Task :sourcesJar
+> Task :processTestResources NO-SOURCE
+> Task :validateAccessWidener NO-SOURCE
+> Task :remapSourcesJar
+> Task :compileClientKotlin
+> Task :compileClientJava UP-TO-DATE
+> Task :jar
+> Task :clientClasses UP-TO-DATE
+> Task :compileTestKotlin NO-SOURCE
+> Task :compileTestJava NO-SOURCE
+> Task :testClasses UP-TO-DATE
+> Task :test NO-SOURCE
+> Task :check UP-TO-DATE
+> Task :remapJar
+> Task :assemble
+> Task :build
+
+BUILD SUCCESSFUL in 19s
+11 actionable tasks: 6 executed, 5 up-to-date

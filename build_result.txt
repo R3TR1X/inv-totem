@@ -1,0 +1,31 @@
+
+> Configure project :
+Fabric Loom: 1.15.5
+
+> Task :clean
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :processResources
+> Task :processClientResources
+> Task :processIncludeJars
+> Task :sourcesJar
+> Task :processTestResources NO-SOURCE
+> Task :validateAccessWidener NO-SOURCE
+> Task :compileKotlin
+> Task :remapSourcesJar
+> Task :compileJava
+> Task :classes
+> Task :compileClientKotlin
+> Task :compileClientJava
+> Task :jar
+> Task :clientClasses
+> Task :compileTestKotlin NO-SOURCE
+> Task :compileTestJava NO-SOURCE
+> Task :testClasses UP-TO-DATE
+> Task :test NO-SOURCE
+> Task :check UP-TO-DATE
+> Task :remapJar
+> Task :assemble
+> Task :build
+
+BUILD SUCCESSFUL in 7s
+12 actionable tasks: 12 executed

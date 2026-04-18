@@ -36,6 +36,7 @@ object TotemMacroTracker {
 		CLICK_COOLDOWN,             // Brief delay between first and second click
 		SECOND_CLICK,               // Clicking the target slot (offhand or hotbar)
 		CLOSING_INVENTORY,          // Closing the inventory screen
+		POST_CLOSE_DRAIN,           // Drain phantom click events after screen closes
 	}
 
 	private var currentState: State = State.IDLE
@@ -119,7 +120,6 @@ object TotemMacroTracker {
 		lastOffhandHadTotem = currentOffhandHasTotem
 
 		if (currentState != State.IDLE) {
-			suppressHeldInputs(client)
 
 			// FIX-1: Timeout — abort if stuck in any state for too long (e.g., screen failed to open)
 			if (macroTick - stateEntryTick > STATE_TIMEOUT_TICKS) {
@@ -281,23 +281,45 @@ object TotemMacroTracker {
 			}
 			
 			State.CLOSING_INVENTORY -> {
-				// Close the inventory
+				// Close the inventory screen — do NOT touch KeyMapping state here.
+				// GLFW hasn't polled yet, so draining now would miss the next callback.
 				client.setScreen(null)
-				currentState = State.IDLE
-				logger.info("Inventory closed, totem replacement complete")
+				currentState = State.POST_CLOSE_DRAIN
+				tickCounter = 0
+				stateEntryTick = macroTick
+				logger.info("Inventory closed, entering post-close drain")
+			}
 
+			State.POST_CLOSE_DRAIN -> {
 				// ────────────────────────────────────────────────────────────
-				// FIX-2: Crystal combo re-trigger.
-				//   If another totem pop was detected while we were mid-sequence,
-				//   immediately restart the replacement instead of staying idle.
+				// FIX-4 v2: Drain phantom click events for 3 ticks AFTER the
+				//   screen closes. This lets GLFW's input callbacks settle
+				//   before we return control. We NEVER call setDown() — that
+				//   was the root cause of the phantom-click and pause/rejoin
+				//   bugs (forcing false created artificial press transitions
+				//   every time GLFW re-polled the physical mouse state).
 				// ────────────────────────────────────────────────────────────
-				if (pendingRepop) {
-					pendingRepop = false
-					logger.info("Crystal combo: re-triggering macro for pending re-pop.")
-					currentState = State.INVENTORY_OPENING
-					tickCounter = 0
-					totemSlotIndex = -1
-					stateEntryTick = macroTick
+				while (client.options.keyAttack.consumeClick()) { /* drain */ }
+				while (client.options.keyUse.consumeClick()) { /* drain */ }
+				tickCounter++
+
+				if (tickCounter >= 3) {
+					currentState = State.IDLE
+					logger.info("Post-close drain complete, totem replacement finished")
+
+					// ────────────────────────────────────────────────────────
+					// FIX-2: Crystal combo re-trigger.
+					//   If another totem pop fired while we were mid-sequence,
+					//   immediately restart the replacement.
+					// ────────────────────────────────────────────────────────
+					if (pendingRepop) {
+						pendingRepop = false
+						logger.info("Crystal combo: re-triggering macro for pending re-pop.")
+						currentState = State.INVENTORY_OPENING
+						tickCounter = 0
+						totemSlotIndex = -1
+						stateEntryTick = macroTick
+					}
 				}
 			}
 		}
@@ -365,10 +387,7 @@ object TotemMacroTracker {
 		}
 	}
 
-	private fun suppressHeldInputs(client: Minecraft) {
-		KeyMapping.releaseAll()
-		client.options.keyMappings.forEach { it.setDown(false) }
-	}
+
 
 	private fun currentSyncId(player: Player): Int {
 		return player.inventoryMenu.containerId
@@ -477,9 +496,10 @@ object TotemMacroTracker {
 		pendingRepop = false           // FIX-2: clear queued re-trigger on abort
 		verifyTask = null
 		client.setScreen(null)
-		currentState = State.IDLE
+		currentState = State.POST_CLOSE_DRAIN  // go through drain, not directly to IDLE
 		tickCounter = 0
 		totemSlotIndex = -1
+		stateEntryTick = macroTick
 		logger.warn(message)
 	}
 }
